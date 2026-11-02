@@ -26,6 +26,8 @@ COPY package.json ./
 COPY prompts ./prompts
 COPY workspace-template ./workspace-template
 COPY deploy/compose.yaml ./deploy/compose.yaml
+# The deploy workflow copies these two files out of the new image onto the EC2 host.
+COPY deploy/ec2/deploy.sh ./deploy/ec2/deploy.sh
 ENV NODE_ENV=production \
     RIN_WORKSPACE=/data/workspace \
     RIN_CLAUDE_CONFIG_DIR=/data/claude \
