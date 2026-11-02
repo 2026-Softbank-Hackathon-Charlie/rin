@@ -1,0 +1,52 @@
+# EC2 deployment. deploy/ec2/deploy.sh runs:
+#   RIN_IMAGE=<ecr image> docker compose --env-file /run/rin.env -f compose.yaml up -d
+# /run/rin.env holds the secrets read from SSM (/rin/*), including POSTGRES_PASSWORD.
+name: rin
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: rin
+      POSTGRES_DB: rin
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is not set}
+    volumes:
+      - /srv/rin/pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rin"]
+      interval: 5s
+      retries: 30
+
+  gateway:
+    image: ${RIN_IMAGE:?RIN_IMAGE is not set}
+    restart: unless-stopped
+    command: ["node", "dist/gateway/main.js"]
+    env_file: /run/rin.env
+    environment:
+      DATABASE_URL: postgres://rin:${POSTGRES_PASSWORD}@postgres:5432/rin
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8081/healthz"]
+      interval: 10s
+      retries: 6
+
+  worker:
+    image: ${RIN_IMAGE:?RIN_IMAGE is not set}
+    restart: unless-stopped
+    command: ["node", "dist/worker/main.js"]
+    env_file: /run/rin.env
+    environment:
+      DATABASE_URL: postgres://rin:${POSTGRES_PASSWORD}@postgres:5432/rin
+    volumes:
+      - /srv/rin/data:/data
+    # The worker finishes running jobs for up to 4 minutes before it stops.
+    stop_grace_period: 5m
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/healthz"]
+      interval: 10s
+      retries: 6

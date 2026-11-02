@@ -1,0 +1,30 @@
+{
+  "name": "rin",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --import tsx --test test/*.test.ts",
+    "dev:gateway": "node --env-file=.env --import tsx src/gateway/main.ts",
+    "dev:worker": "node --env-file=.env --import tsx src/worker/main.ts",
+    "start:gateway": "node dist/gateway/main.js",
+    "start:worker": "node dist/worker/main.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.316",
+    "@slack/bolt": "^5.1.0",
+    "@slack/web-api": "^8.3.0",
+    "croner": "^11.0.0",
+    "postgres": "^4.0.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  }
+}
