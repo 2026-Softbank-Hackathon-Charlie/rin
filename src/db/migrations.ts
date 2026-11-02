@@ -41,4 +41,37 @@ export const migrations: { id: number; sql: string }[] = [
       );
     `,
   },
+  {
+    id: 2,
+    sql: `
+      -- Worktrees made for write work; a thread keeps using its worktree for the same repo.
+      create table worktrees (
+        id serial primary key,
+        thread_ts text not null,
+        repo text not null,
+        path text not null unique,
+        branch text not null,
+        created_at timestamptz not null default now(),
+        last_used_at timestamptz not null default now(),
+        unique (thread_ts, repo)
+      );
+
+      create table schedules (
+        id serial primary key,
+        title text not null,
+        cron text not null,
+        prompt text not null,
+        created_by text not null,
+        enabled boolean not null default true,
+        next_run_at timestamptz not null,
+        last_run_at timestamptz,
+        fail_streak int not null default 0,
+        created_at timestamptz not null default now()
+      );
+
+      alter table jobs add column schedule_id int references schedules (id) on delete set null;
+      alter table threads drop column worktree_path;
+      alter table threads drop column branch;
+    `,
+  },
 ];

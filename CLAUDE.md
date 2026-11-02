@@ -4,10 +4,14 @@ Rin이 자기 자신을 고칠 때, 그리고 팀원이 이 레포를 고칠 때
 
 ## 구조
 
-- `src/gateway/main.ts`: Slack 수신, 호출 게이트, 취소 버튼, `@Rin 모델` 명령
-- `src/worker/main.ts`: 큐 소비, 동시 실행 제한, 취소 감지, 종료 시 작업 마무리
-- `src/worker/run.ts`: 작업 하나의 실행(스레드 맥락, Agent SDK, 상태 메시지, 결과 게시)
+- `src/gateway/main.ts`: 채널 멘션과 DM 수신, 호출 게이트, 취소 버튼, `@Rin 모델` 명령
+- `src/worker/main.ts`: 큐 소비, 동시 실행 제한, 취소 감지, 예약 디스패치, 레포 동기화, 종료 시 작업 마무리
+- `src/worker/run.ts`: 작업 하나의 실행. Slack 요청은 상태 메시지와 스레드 답, 예약 작업은 채널 본문 글
 - `src/worker/thread.ts`: 스레드 글을 프롬프트로 바꾼다. 팀원 글은 지시, 그 밖은 자료로 감싼다
+- `src/worker/repos.ts`: `repos/` clone 동기화, worktree 생성과 정리
+- `src/worker/cron.ts`, `src/worker/scheduler.ts`: 예약 시각 계산과 디스패치
+- `src/github/app.ts`: GitHub App 설치 토큰과 봇 커밋 신원
+- `src/agent/tools.ts`: Claude에게 주는 Rin 도구(`mcp__rin__*`)
 - `src/agent/guards.ts`: Bash와 파일 쓰기 정책. `src/agent/options.ts`가 PreToolUse 훅으로 건다
 - `src/slack/`: 메시지 나누기, 상태 메시지 블록
 - `src/db/`: Postgres 접근과 마이그레이션

@@ -27,7 +27,7 @@ function systemAppend(): string {
   return cachedPrompt;
 }
 
-function childEnv(): Record<string, string> {
+function childEnv(extra: Record<string, string>): Record<string, string> {
   const env: Record<string, string> = {};
   for (const key of PASS_THROUGH) {
     const value = process.env[key];
@@ -37,7 +37,7 @@ function childEnv(): Record<string, string> {
   env.CLAUDE_CONFIG_DIR = config.claudeConfigDir;
   env.CLAUDE_AGENT_SDK_CLIENT_APP = 'rin/0.1';
   env.TZ = 'Asia/Seoul';
-  return env;
+  return { ...env, ...extra };
 }
 
 function toHookOutput(v: Verdict): HookJSONOutput {
@@ -52,6 +52,9 @@ export function buildOptions(p: {
   resume?: string;
   abortController: AbortController;
   mergeAllowed: boolean;
+  /** Extra variables for the Claude process: GitHub token, git identity, view-only AWS keys. */
+  env?: Record<string, string>;
+  mcpServers?: Options['mcpServers'];
   stderr?: (data: string) => void;
 }): Options {
   const bashHook: HookCallback = async (input) => {
@@ -84,7 +87,8 @@ export function buildOptions(p: {
         { matcher: 'Edit|Write|MultiEdit|NotebookEdit', hooks: [writeHook] },
       ],
     },
-    env: childEnv(),
+    mcpServers: p.mcpServers,
+    env: childEnv(p.env ?? {}),
     stderr: p.stderr,
   };
 }

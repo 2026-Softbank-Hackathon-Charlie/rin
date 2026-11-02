@@ -1,0 +1,102 @@
+name: deploy
+
+# Builds the image, pushes it to ECR as hopcharlie/rin:<sha> and deploys it on
+# the EC2 host through SSM Run Command (deploy/ec2/deploy.sh, which rolls back
+# on failure). AWS resources and one-time setup: deploy/aws/README.md.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: deploy-rin
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      # rin-deploy trusts only this repository's main branch.
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.RIN_DEPLOY_ROLE_ARN }}
+          aws-region: ap-northeast-2
+
+      - id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push
+        id: image
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+        run: |
+          image="$REGISTRY/hopcharlie/rin:$GITHUB_SHA"
+          docker build -t "$image" .
+          docker push "$image"
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy on EC2
+        env:
+          IMAGE: ${{ steps.image.outputs.image }}
+          INSTANCE_ID: ${{ vars.RIN_INSTANCE_ID }}
+        run: |
+          # Runs as root on the host. deploy.sh and compose.yaml come from the
+          # image itself, so the host always runs the scripts of the version it deploys.
+          params="$(jq -cn --arg image "$IMAGE" '{commands: [
+            "set -eu",
+            "export HOME=/root",
+            "image=\($image)",
+            "aws ecr get-login-password --region ap-northeast-2 | docker login --username AWS --password-stdin \"${image%%/*}\"",
+            "docker pull -q \"$image\"",
+            "cid=$(docker create \"$image\")",
+            "docker cp \"$cid:/app/deploy/ec2/deploy.sh\" /srv/rin/deploy.sh",
+            "docker cp \"$cid:/app/deploy/compose.yaml\" /srv/rin/compose.yaml",
+            "docker rm \"$cid\" >/dev/null",
+            "bash /srv/rin/deploy.sh \"$image\""
+          ]}')"
+
+          cmd_id="$(aws ssm send-command \
+            --instance-ids "$INSTANCE_ID" \
+            --document-name AWS-RunShellScript \
+            --comment "rin deploy ${GITHUB_SHA::7}" \
+            --timeout-seconds 900 \
+            --parameters "$params" \
+            --query Command.CommandId --output text)"
+          echo "SSM command $cmd_id"
+
+          # Terminal states of an invocation: Success, Failed, Cancelled, TimedOut.
+          status=""
+          while :; do
+            sleep 10
+            status="$(aws ssm get-command-invocation --command-id "$cmd_id" --instance-id "$INSTANCE_ID" \
+              --query Status --output text 2>/dev/null || true)"
+            case "$status" in
+              Success | Failed | Cancelled | TimedOut) break ;;
+            esac
+          done
+
+          echo "::group::stdout"
+          aws ssm get-command-invocation --command-id "$cmd_id" --instance-id "$INSTANCE_ID" \
+            --query StandardOutputContent --output text
+          echo "::endgroup::"
+          echo "::group::stderr"
+          aws ssm get-command-invocation --command-id "$cmd_id" --instance-id "$INSTANCE_ID" \
+            --query StandardErrorContent --output text
+          echo "::endgroup::"
+
+          if [ "$status" != Success ]; then
+            echo "::error::deploy on $INSTANCE_ID ended with $status"
+            exit 1
+          fi

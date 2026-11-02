@@ -28,7 +28,7 @@ function kst(ts: string): string {
 }
 
 /** Rewrites mentions to readable names and neutralises the data-fence markers. */
-function clean(text: string, botUserId: string): string {
+export function clean(text: string, botUserId: string): string {
   return text
     .replaceAll(`<@${botUserId}>`, '@Rin')
     .replace(/<@([A-Z0-9]+)>/g, (_m, id: string) => `@${displayName(id)}`)
@@ -47,12 +47,14 @@ export function buildPrompt(p: {
   sinceTs: string | null;
   botUserId: string;
   hasSession: boolean;
+  place?: 'channel' | 'dm';
   now?: Date;
 }): string {
   const team = config.allowedUsers;
   const parts: string[] = [];
   const now = (p.now ?? new Date()).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', hour12: false });
-  parts.push(`[상황] 지금 시각은 ${now} (KST)이다. Slack 채널 #final_team_charlie의 스레드에서 호출되었다.`);
+  const where = p.place === 'dm' ? '팀원과의 Slack DM 스레드' : 'Slack 채널 #final_team_charlie의 스레드';
+  parts.push(`[상황] 지금 시각은 ${now} (KST)이다. ${where}에서 호출되었다.`);
 
   const trigger = p.messages.find((m) => m.ts === p.triggerTs);
   const earlier = p.messages.filter((m) => tsNum(m.ts) < tsNum(p.triggerTs) && tsNum(m.ts) > tsNum(p.sinceTs));
@@ -80,4 +82,13 @@ export function buildPrompt(p: {
   const files = trigger?.files?.length ? `\n(첨부 파일 ${trigger.files.length}개는 아직 읽을 수 없다)` : '';
   parts.push(`[지시] 이번 요청, ${displayName(trigger?.user)}\n${request}${files}`);
   return parts.join('\n\n');
+}
+
+/** Prompt for a scheduled run. The result is posted to the team channel as a new message. */
+export function buildSchedulePrompt(p: { id: number; title: string; prompt: string; createdBy: string; now?: Date }): string {
+  const now = (p.now ?? new Date()).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', hour12: false });
+  return [
+    `[상황] 지금 시각은 ${now} (KST)이다. 예약 작업 #${p.id} "${p.title}"이 정해진 시각에 실행되었다. 네 답은 팀 채널 #final_team_charlie 본문에 새 글로 올라간다. 이 실행에서는 PR을 머지하지 않는다.`,
+    `[지시] 예약 작업 내용, ${displayName(p.createdBy)}님이 등록\n${p.prompt}`,
+  ].join('\n\n');
 }
