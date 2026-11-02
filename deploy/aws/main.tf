@@ -46,7 +46,9 @@ locals {
   name          = "rin"
   account_id    = data.aws_caller_identity.me.account_id
   parameter_arn = "arn:aws:ssm:${var.region}:${local.account_id}:parameter/rin"
-  github_ref    = "repo:2026-Softbank-Hackathon-Charlie/rin:ref:refs/heads/main"
+  # The repo uses GitHub's immutable OIDC subject, which carries the owner and repo IDs
+  # (gh api repos/2026-Softbank-Hackathon-Charlie/rin/actions/oidc/customization/sub).
+  github_ref = "repo:2026-Softbank-Hackathon-Charlie@350278309/rin@1443173546:ref:refs/heads/main"
 }
 
 # --- image registry ---
