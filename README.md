@@ -74,5 +74,7 @@ docker compose -f compose.dev.yaml exec worker curl -s "<복사한 주소>"
 npm run typecheck
 npm test
 docker compose -f compose.dev.yaml up -d postgres
-DATABASE_URL=postgres://rin:rin@localhost:5433/rin node --import tsx test/db.smoke.ts
+docker compose -f compose.dev.yaml exec postgres createdb -U rin rin_test   # 처음 한 번
+# 테이블을 비우는 검사라서 이름이 _test로 끝나는 DB에서만 돈다
+DATABASE_URL=postgres://rin:rin@localhost:5433/rin_test node --import tsx test/db.smoke.ts
 ```

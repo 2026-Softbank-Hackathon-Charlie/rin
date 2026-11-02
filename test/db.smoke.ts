@@ -1,7 +1,12 @@
 // Manual smoke test of the SQL against a real Postgres (compose.dev.yaml).
-// Run: DATABASE_URL=postgres://rin:rin@localhost:5433/rin node --import tsx test/db.smoke.ts
+// Run: DATABASE_URL=postgres://rin:rin@localhost:5433/rin_test node --import tsx test/db.smoke.ts
 import assert from 'node:assert/strict';
-import { getSetting, migrate, monthCostUsd, setSetting, sql } from '../src/db/index.js';
+// This test truncates tables, so it refuses any database whose name does not end in _test.
+if (!/\/[^/?]+_test(\?|$)/.test(process.env.DATABASE_URL ?? '')) {
+  console.error('db.smoke.ts truncates tables; point DATABASE_URL at a database named *_test');
+  process.exit(1);
+}
+const { getSetting, migrate, monthCostUsd, setSetting, sql } = await import('../src/db/index.js');
 
 await migrate();
 await migrate(); // idempotent
