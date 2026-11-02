@@ -1,6 +1,31 @@
-# Local development: only Postgres. Run gateway and worker with `npm run dev:gateway` / `npm run dev:worker`.
+# Local development.
+#   docker compose -f compose.dev.yaml up -d                 Postgres only (for npm run dev:* and tests)
+#   docker build -t rin:local . && docker compose -f compose.dev.yaml --profile app up -d
+#                                                            Postgres plus gateway and worker in containers,
+#                                                            so Rin's commands run inside a container, not on the host.
 name: rin-dev
 services:
+  gateway:
+    profiles: [app]
+    image: rin:local
+    command: ["node", "dist/gateway/main.js"]
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://rin:rin@postgres:5432/rin
+    depends_on: [postgres]
+  worker:
+    profiles: [app]
+    image: rin:local
+    command: ["node", "dist/worker/main.js"]
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://rin:rin@postgres:5432/rin
+      RIN_WORKSPACE: /data/workspace
+      RIN_CLAUDE_CONFIG_DIR: /data/claude
+    volumes:
+      - ./.data:/data
+    stop_grace_period: 5m
+    depends_on: [postgres]
   postgres:
     image: postgres:16
     environment:
