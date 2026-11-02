@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -47,6 +48,27 @@ export const config = {
   drainMs: int('RIN_DRAIN_MS', 240_000),
 };
 
+export const GITHUB_ORG = env.RIN_GITHUB_ORG ?? '2026-Softbank-Hackathon-Charlie';
+
+/** GitHub App credentials, or undefined when not configured (GitHub features are then off). */
+export function githubApp(): { appId: string; installationId: string; privateKey: string } | undefined {
+  const appId = env.GITHUB_APP_ID;
+  const installationId = env.GITHUB_APP_INSTALLATION_ID;
+  let privateKey: string | undefined;
+  if (env.GITHUB_APP_PRIVATE_KEY_B64) privateKey = Buffer.from(env.GITHUB_APP_PRIVATE_KEY_B64, 'base64').toString('utf8');
+  else if (env.GITHUB_APP_PRIVATE_KEY_PATH) privateKey = fs.readFileSync(env.GITHUB_APP_PRIVATE_KEY_PATH, 'utf8');
+  if (!appId || !installationId || !privateKey) return undefined;
+  return { appId, installationId, privateKey };
+}
+
+/** View-only AWS identity handed to Claude (IAM user rin-ai). Never used by Rin itself. */
+export function aiAwsEnv(): Record<string, string> {
+  const id = env.RIN_AI_AWS_ACCESS_KEY_ID;
+  const secret = env.RIN_AI_AWS_SECRET_ACCESS_KEY;
+  if (!id || !secret) return {};
+  return { AWS_ACCESS_KEY_ID: id, AWS_SECRET_ACCESS_KEY: secret, AWS_REGION: 'ap-northeast-2', AWS_DEFAULT_REGION: 'ap-northeast-2' };
+}
+
 export function healthPort(role: 'gateway' | 'worker'): number {
   return int('RIN_HEALTH_PORT', role === 'gateway' ? 8081 : 8080);
 }
@@ -54,4 +76,12 @@ export function healthPort(role: 'gateway' | 'worker'): number {
 export function displayName(userId: string | undefined): string {
   if (!userId) return '알 수 없음';
   return TEAM[userId] ?? userId;
+}
+
+/** Resolves a team member from a Slack ID, `<@ID>` mention or Korean name (with or without 님). */
+export function resolveTeamMember(who: string): string | undefined {
+  const s = who.trim().replace(/^<@([A-Z0-9]+)(\|[^>]*)?>$/, '$1').replace(/님$/, '');
+  if (config.allowedUsers.has(s)) return s;
+  const byName = Object.entries(TEAM).find(([, name]) => name === s || name.slice(1) === s);
+  return byName && config.allowedUsers.has(byName[0]) ? byName[0] : undefined;
 }

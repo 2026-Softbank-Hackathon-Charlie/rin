@@ -17,6 +17,7 @@ export type Job = {
   status: JobStatus;
   status_ts: string | null;
   cancel_requested_by: string | null;
+  schedule_id: number | null;
   cost_usd: string | null;
   error: string | null;
   created_at: Date;
@@ -28,10 +29,31 @@ export type ThreadRow = {
   thread_ts: string;
   channel: string;
   session_id: string | null;
-  worktree_path: string | null;
-  branch: string | null;
   last_read_ts: string | null;
   updated_at: Date;
+};
+
+export type WorktreeRow = {
+  id: number;
+  thread_ts: string;
+  repo: string;
+  path: string;
+  branch: string;
+  created_at: Date;
+  last_used_at: Date;
+};
+
+export type ScheduleRow = {
+  id: number;
+  title: string;
+  cron: string;
+  prompt: string;
+  created_by: string;
+  enabled: boolean;
+  next_run_at: Date;
+  last_run_at: Date | null;
+  fail_streak: number;
+  created_at: Date;
 };
 
 /** Applies pending migrations. Safe to call from gateway and worker at the same time. */

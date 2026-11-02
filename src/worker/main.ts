@@ -3,7 +3,9 @@ import { config, healthPort, need } from '../config.js';
 import { migrate, sql, type Job } from '../db/index.js';
 import { startHealthServer } from '../health.js';
 import { statusBlocks } from '../slack/blocks.js';
+import { cleanupWorktrees, syncRepos } from './repos.js';
 import { runJob, type RunHandle } from './run.js';
+import { dispatchDueSchedules } from './scheduler.js';
 import { ensureWorkspace } from './workspace.js';
 
 const client = new WebClient(need('SLACK_BOT_TOKEN'));
@@ -110,6 +112,11 @@ async function main(): Promise<void> {
   await recoverInterrupted();
   startHealthServer(healthPort('worker'), () => Date.now() - lastTick < 15_000);
   setInterval(() => void tick(), 1000);
+  const background = (name: string, fn: () => Promise<void>) => () =>
+    void fn().catch((err) => console.error(`${name} failed`, err instanceof Error ? err.message : err));
+  setInterval(background('schedules', () => (draining ? Promise.resolve() : dispatchDueSchedules())), 30_000);
+  setInterval(background('worktree cleanup', cleanupWorktrees), 3600_000);
+  background('repo sync', () => syncRepos(true))();
   process.on('SIGTERM', () => void shutdown('SIGTERM'));
   process.on('SIGINT', () => void shutdown('SIGINT'));
   console.log(`worker ready: concurrency ${config.concurrency}, workspace ${config.workspaceDir}`);

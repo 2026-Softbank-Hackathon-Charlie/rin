@@ -48,6 +48,30 @@ await setSetting('model', 'claude-sonnet-5-5');
 assert.equal(await getSetting('model'), 'claude-sonnet-5-5');
 assert.equal(await monthCostUsd(), 0.25);
 
+// Schedules: a due schedule becomes one job; while that job is active the next round is skipped.
+const { dispatchDueSchedules } = await import('../src/worker/scheduler.js');
+await sql`truncate schedules restart identity cascade`;
+const [s] = await sql<{ id: number }[]>`
+  insert into schedules (title, cron, prompt, created_by, next_run_at)
+  values ('t', '*/10 * * * *', 'p', 'U1', now() - interval '1 minute') returning id`;
+await dispatchDueSchedules();
+const scheduled = await sql<{ id: number; kind: string }[]>`select id, kind from jobs where schedule_id = ${s!.id}`;
+assert.equal(scheduled.length, 1);
+assert.equal(scheduled[0]!.kind, 'schedule');
+const [after] = await sql<{ next_run_at: Date; enabled: boolean }[]>`select next_run_at, enabled from schedules where id = ${s!.id}`;
+assert.ok(after!.next_run_at.getTime() > Date.now(), 'next run moved forward');
+await sql`update schedules set next_run_at = now() - interval '1 minute' where id = ${s!.id}`;
+await dispatchDueSchedules();
+assert.equal((await sql`select 1 from jobs where schedule_id = ${s!.id}`).length, 1, 'skipped while the first run is queued');
+// A one-off schedule turns itself off after dispatch.
+const [once] = await sql<{ id: number }[]>`
+  insert into schedules (title, cron, prompt, created_by, next_run_at)
+  values ('once', ${new Date(Date.now() - 60_000).toISOString()}, 'p', 'U1', now() - interval '1 minute') returning id`;
+await dispatchDueSchedules();
+const [onceRow] = await sql<{ enabled: boolean }[]>`select enabled from schedules where id = ${once!.id}`;
+assert.equal(onceRow!.enabled, false);
+await sql`truncate jobs, schedules restart identity cascade`;
+
 await sql`truncate jobs, threads, settings restart identity`;
 await sql.end();
 console.log('db smoke test passed');
