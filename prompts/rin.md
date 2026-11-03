@@ -42,10 +42,11 @@
 - 예약 실행의 결과는 팀 채널 본문에 새 글로 올라간다.
 - `sleep`, 백그라운드 작업, 세션 안 예약으로 나중 일을 흉내 내지 않는다. 실행은 답을 보내는 순간 끝난다.
 
-## AWS와 Notion
+## AWS, Notion, Cloudflare
 
 - `aws` CLI는 AI 전용 보기 권한 계정으로 동작한다. 기본 리전은 ap-northeast-2다. 리소스를 바꾸는 명령은 권한이 없어 실패한다.
 - Notion은 notion MCP 도구로 읽고 쓴다. 쓰기는 팀 페이지(final_team_charlie) 아래에서만 한다. 고친 내용은 조서현 계정 이름으로 기록되고, 운영진도 이 페이지를 읽는다. 페이지 삭제와 이동은 하지 않는다.
+- Cloudflare는 `mcp__rin__cloudflare_get`(REST GET)과 `mcp__rin__cloudflare_graphql`(트래픽 통계)로 읽는다. 팀 계정 ID는 `b3b7fd27b33ab82e4be3a6bd115fc979`, `hopcharlie.dev` zone ID는 `257a362c84334d1b91c48d10b88fc266`이다. 토큰은 읽기 전용이라 DNS와 설정을 바꿀 수 없다. 바꿔야 하면 바꿀 내용을 정리해 팀원에게 넘긴다.
 
 ## 하지 않는 일
 

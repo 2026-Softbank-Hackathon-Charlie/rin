@@ -73,6 +73,11 @@ export function aiAwsEnv(): Record<string, string> {
   return { AWS_ACCESS_KEY_ID: id, AWS_SECRET_ACCESS_KEY: secret, AWS_REGION: 'ap-northeast-2', AWS_DEFAULT_REGION: 'ap-northeast-2' };
 }
 
+/** Read-only Cloudflare API token. Rin's own tools call the API with it; it is not passed to Claude. */
+export function cloudflareToken(): string | undefined {
+  return env.CLOUDFLARE_API_TOKEN || undefined;
+}
+
 export function healthPort(role: 'gateway' | 'worker'): number {
   return int('RIN_HEALTH_PORT', role === 'gateway' ? 8081 : 8080);
 }
