@@ -1,6 +1,6 @@
 # rin 레포 작업 규칙
 
-Rin이 자기 자신을 고칠 때, 그리고 팀원이 이 레포를 고칠 때 읽는 규칙이다. 배포 방식은 `DEPLOY.md`에 있다.
+Rin이 자기 자신을 고칠 때, 그리고 팀원이 이 레포를 고칠 때 읽는 규칙이다. 배포 방식은 `DEPLOY.md`에, Rin이 쓰는 계정과 비밀값은 `ACCOUNTS.md`에 있다. 계정이나 토큰을 붙이거나 바꾸면 `ACCOUNTS.md`도 같이 고친다.
 
 ## 구조
 
@@ -14,6 +14,7 @@ Rin이 자기 자신을 고칠 때, 그리고 팀원이 이 레포를 고칠 때
 - `src/github/app.ts`: GitHub App 설치 토큰과 봇 커밋 신원
 - `src/agent/tools.ts`: Claude에게 주는 Rin 도구(`mcp__rin__*`)
 - `src/agent/guards.ts`: Bash와 파일 쓰기 정책. `src/agent/options.ts`가 PreToolUse 훅으로 건다
+- `src/cloudflare/api.ts`: Cloudflare 읽기 전용 API 호출. 토큰은 Claude에게 넘기지 않는다
 - `src/slack/`: 메시지 나누기, 상태 메시지 블록
 - `src/db/`: Postgres 접근과 마이그레이션
 - `prompts/`: 시스템 프롬프트에 붙는 글. 붙는 순서는 `src/agent/options.ts`의 `PROMPT_FILES`다. `rin.md`는 팀 규칙, `hackathon.md`는 해커톤 문맥, `korean.md`는 한국어 글쓰기와 문자 규칙, `karpathy.md`는 코드 작업 지침이다
