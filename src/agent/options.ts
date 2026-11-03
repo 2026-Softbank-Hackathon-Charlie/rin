@@ -21,9 +21,12 @@ const DISALLOWED_TOOLS = [
 /** Variables passed through to the Claude Code process. The SDK `env` option replaces the whole environment. */
 const PASS_THROUGH = ['PATH', 'HOME', 'USERPROFILE', 'SystemRoot', 'SYSTEMROOT', 'PATHEXT', 'ComSpec', 'TEMP', 'TMP', 'APPDATA', 'LOCALAPPDATA', 'LANG'];
 
+/** Files under prompts/ appended to the Claude Code system prompt, in this order. */
+export const PROMPT_FILES = ['rin.md', 'hackathon.md', 'korean.md', 'karpathy.md', 'persona.md'];
+
 let cachedPrompt: string | undefined;
-function systemAppend(): string {
-  cachedPrompt ??= fs.readFileSync(path.join(appRoot, 'prompts', 'rin.md'), 'utf8');
+export function systemAppend(): string {
+  cachedPrompt ??= PROMPT_FILES.map((name) => fs.readFileSync(path.join(appRoot, 'prompts', name), 'utf8').trim()).join('\n\n');
   return cachedPrompt;
 }
 
