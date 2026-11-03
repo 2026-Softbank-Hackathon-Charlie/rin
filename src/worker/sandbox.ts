@@ -1,6 +1,5 @@
 import { execFile, spawn } from 'node:child_process';
 import crypto from 'node:crypto';
-import path from 'node:path';
 import { promisify } from 'node:util';
 import type { SpawnedProcess, SpawnOptions } from '@anthropic-ai/claude-agent-sdk';
 import { config, type SandboxConfig } from '../config.js';
@@ -26,13 +25,11 @@ export function sandboxArgs(p: {
   cfg: SandboxConfig;
   name: string;
   jobId: number;
-  workspaceDir: string;
   cwd: string;
   envKeys: string[];
   command: string;
   args: string[];
 }): string[] {
-  const repos = path.posix.relative(DATA, path.posix.join(p.workspaceDir, 'repos'));
   return [
     'run', '--rm', '-i', '--init',
     '--name', p.name,
@@ -40,10 +37,9 @@ export function sandboxArgs(p: {
     '--network', p.cfg.network,
     '--memory', MEMORY,
     '--pids-limit', PIDS,
+    // Every sandbox shares /data, including the clones under workspace/repos/, so work in one run can be
+    // picked up by another. The worker never runs git or anything else Claude wrote there.
     '-v', `${p.cfg.hostData}:${DATA}`,
-    // The worker runs git in these clones with its own environment, so a hook or git config written
-    // there would run outside the sandbox. Claude only reads them.
-    '-v', `${path.posix.join(p.cfg.hostData, repos)}:${path.posix.join(DATA, repos)}:ro`,
     '-w', p.cwd,
     // `-e KEY` without a value copies it from the docker CLI's environment, so values stay out of the process list.
     ...p.envKeys.flatMap((key) => ['-e', key]),
@@ -66,7 +62,7 @@ export function sandboxSpawner(jobId: number, log: (text: string) => void): ((o:
     const env = Object.fromEntries(Object.entries(o.env).filter((e): e is [string, string] => e[1] !== undefined));
     const child = spawn(
       'docker',
-      sandboxArgs({ cfg, name, jobId, workspaceDir: config.workspaceDir, cwd: o.cwd ?? config.workspaceDir, envKeys: Object.keys(env), command: o.command, args: o.args }),
+      sandboxArgs({ cfg, name, jobId, cwd: o.cwd ?? config.workspaceDir, envKeys: Object.keys(env), command: o.command, args: o.args }),
       { env, stdio: ['pipe', 'pipe', 'pipe'] },
     );
     child.stderr.setEncoding('utf8');
@@ -86,7 +82,7 @@ export async function checkSandbox(): Promise<void> {
   const cfg = config.sandbox;
   if (!cfg) return;
   const name = `rin-sbx-check-${crypto.randomBytes(3).toString('hex')}`;
-  await run('docker', sandboxArgs({ cfg, name, jobId: 0, workspaceDir: config.workspaceDir, cwd: config.workspaceDir, envKeys: [], command: 'true', args: [] }));
+  await run('docker', sandboxArgs({ cfg, name, jobId: 0, cwd: config.workspaceDir, envKeys: [], command: 'true', args: [] }));
 }
 
 /** Removes sandboxes whose job is not running any more, such as those of a worker that died. Leader only. */

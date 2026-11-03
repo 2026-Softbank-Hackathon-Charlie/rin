@@ -31,26 +31,6 @@ export async function installationToken(): Promise<string | undefined> {
   return cached.token;
 }
 
-export type RepoInfo = { name: string; default_branch: string; archived: boolean };
-
-export async function installationRepos(token: string): Promise<RepoInfo[]> {
-  const res = await fetch(`${API}/installation/repositories?per_page=100`, { headers: headers(`token ${token}`) });
-  if (!res.ok) throw new Error(`listing repos failed: ${res.status}`);
-  const body = (await res.json()) as { repositories: RepoInfo[] };
-  return body.repositories.filter((r) => !r.archived);
-}
-
-/** State of the PRs whose head is `branch` ('open', 'closed', or undefined when there is none). */
-export async function prStateForBranch(token: string, org: string, repo: string, branch: string): Promise<'open' | 'closed' | undefined> {
-  const res = await fetch(`${API}/repos/${org}/${repo}/pulls?state=all&head=${org}:${encodeURIComponent(branch)}`, {
-    headers: headers(`token ${token}`),
-  });
-  if (!res.ok) return undefined;
-  const pulls = (await res.json()) as { state: 'open' | 'closed' }[];
-  if (pulls.length === 0) return undefined;
-  return pulls.some((p) => p.state === 'open') ? 'open' : 'closed';
-}
-
 let identity: { name: string; email: string } | undefined;
 
 /** Commit author for the App's bot user, e.g. `charlie-rin[bot] <id+charlie-rin[bot]@users.noreply.github.com>`. */

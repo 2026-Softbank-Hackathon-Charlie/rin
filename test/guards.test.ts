@@ -50,7 +50,7 @@ test('mentioning a tool name inside another command is fine', () => {
   assert.equal(allowed('git log --oneline -5'), true);
 });
 
-test('repos/ is read-only for file tools', () => {
+test('file tools do not edit the shared clones under repos/, only worktrees', () => {
   const ws = path.resolve('/data/workspace');
   assert.equal(checkWritePath(path.join(ws, 'repos/platform/README.md'), ws).allow, false);
   assert.equal(checkWritePath('repos/platform/README.md', ws).allow, false);

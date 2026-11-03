@@ -11,7 +11,7 @@
 
 ## 디렉터리
 
-- `repos/`: 팀 레포의 읽기용 clone. 직접 고치지 않는다.
-- `worktrees/`: 코드를 고칠 때 만드는 worktree.
+- `repos/`: 팀 레포의 clone. 모든 실행이 같이 쓰므로 작업 트리는 기본 브랜치에 두고 직접 고치지 않는다. 읽기 전에 `git pull --ff-only`로 맞춘다.
+- `worktrees/`: 코드를 고칠 때 `repos/<레포>`에서 `git worktree add`로 만드는 worktree. 다른 대화에서 이어서 작업할 수 있다.
 - `memory/`: Claude Code 자동 메모리.
 - `.claude/skills/`: 팀과 일하면서 만든 스킬. `visuals`처럼 rin 레포의 `workspace-template/skills/`에 있는 스킬은 배포할 때마다 레포 내용으로 덮어쓰므로, 고치려면 rin 레포에서 고친다.
