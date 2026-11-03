@@ -53,4 +53,8 @@ test('prompts say where Rin was called from', () => {
   assert.match(sched, /예약 작업 #3 "아침 요약"/);
   assert.match(sched, /PR을 머지하지 않는다/);
   assert.match(sched, /\[지시\] 예약 작업 내용, 조서현님이 등록\n어제 대화 요약/);
+  assert.match(sched, /팀 채널 #final_team_charlie 본문에 새 글로/);
+  const quiet = buildSchedulePrompt({ id: 4, title: 'DM', prompt: 'DM 보내기', createdBy: 'U0C4K3UE58U', announce: false });
+  assert.match(quiet, /Slack 어디에도 올라가지 않고/);
+  assert.doesNotMatch(quiet, /본문에 새 글로/);
 });

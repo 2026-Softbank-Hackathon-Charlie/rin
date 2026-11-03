@@ -51,7 +51,7 @@ function scheduleLine(s: ScheduleRow): string {
   const prompt = s.prompt.replace(/\s+/g, ' ');
   return [
     `#${s.id} [${s.enabled ? '켜짐' : '꺼짐'}] ${s.title}`,
-    `  시각: ${s.cron} | 다음 실행: ${s.enabled ? formatKst(s.next_run_at) : '-'} | 등록: ${displayName(s.created_by)} | 연속 실패: ${s.fail_streak}`,
+    `  시각: ${s.cron} | 다음 실행: ${s.enabled ? formatKst(s.next_run_at) : '-'} | 등록: ${displayName(s.created_by)} | 연속 실패: ${s.fail_streak} | 채널 글: ${s.announce ? '올림' : '안 올림'}`,
     `  내용: ${prompt.length > 150 ? prompt.slice(0, 149) + '…' : prompt}`,
   ].join('\n');
 }
@@ -170,18 +170,26 @@ export function rinToolServer(ctx: ToolContext) {
       ),
       tool(
         'schedule_create',
-        `예약 작업을 등록한다. when은 한국 시간 기준 5자리 cron 식(예: "0 9 * * 1-5")이거나, 한 번만 실행할 ISO 시각(예: "2026-11-04T09:00:00+09:00")이다. 반복 간격은 10분 이상이다. 활성 예약은 최대 ${MAX_ACTIVE_SCHEDULES}개다. prompt는 실행 때 Rin이 받을 지시이며, 결과는 팀 채널 본문에 올라간다.`,
-        { title: z.string().min(1).max(100), when: z.string(), prompt: z.string().min(1).max(4000) },
-        async ({ title, when, prompt }) => {
+        `예약 작업을 등록한다. when은 한국 시간 기준 5자리 cron 식(예: "0 9 * * 1-5")이거나, 한 번만 실행할 ISO 시각(예: "2026-11-04T09:00:00+09:00")이다. 반복 간격은 10분 이상이다. 활성 예약은 최대 ${MAX_ACTIVE_SCHEDULES}개다. prompt는 실행 때 Rin이 받을 지시다. announce가 true면 결과가 팀 채널 본문에 올라가고, false면 채널에 아무것도 올리지 않으며 실패만 등록자에게 DM으로 알린다.`,
+        {
+          title: z.string().min(1).max(100),
+          when: z.string(),
+          prompt: z.string().min(1).max(4000),
+          announce: z
+            .boolean()
+            .describe('결과를 팀 채널에 올릴지. 요약, 보고처럼 채널에 글을 쓰는 것이 목적이면 true, DM 보내기처럼 실행 자체가 목적이면 false'),
+        },
+        async ({ title, when, prompt, announce }) => {
           const plan = planSchedule(when);
           if (!plan.ok) return text(`등록하지 못했다: ${plan.reason}`);
           const [{ count } = { count: 0 }] = await sql<{ count: number }[]>`select count(*)::int as count from schedules where enabled`;
           if (count >= MAX_ACTIVE_SCHEDULES) return text(`등록하지 못했다: 활성 예약이 이미 ${count}개다. 쓰지 않는 예약을 지우거나 끈다.`);
           const [row] = await sql<{ id: number }[]>`
-            insert into schedules (title, cron, prompt, created_by, next_run_at)
-            values (${title}, ${when.trim()}, ${prompt}, ${ctx.requester ?? 'unknown'}, ${plan.next[0]!})
+            insert into schedules (title, cron, prompt, created_by, next_run_at, announce)
+            values (${title}, ${when.trim()}, ${prompt}, ${ctx.requester ?? 'unknown'}, ${plan.next[0]!}, ${announce})
             returning id`;
-          return text(`예약 #${row!.id} "${title}"을 등록했다. 다음 실행(KST): ${plan.next.map(formatKst).join(', ')}`);
+          const where = announce ? '결과는 팀 채널에 올라간다' : '팀 채널에는 올리지 않는다';
+          return text(`예약 #${row!.id} "${title}"을 등록했다. ${where}. 다음 실행(KST): ${plan.next.map(formatKst).join(', ')}`);
         },
       ),
       tool('schedule_list', '등록된 예약 작업을 모두 보여 준다.', {}, async () => {
@@ -190,15 +198,16 @@ export function rinToolServer(ctx: ToolContext) {
       }),
       tool(
         'schedule_update',
-        '예약 작업을 고친다. 준 항목만 바뀐다. enabled로 끄거나 다시 켠다.',
+        '예약 작업을 고친다. 준 항목만 바뀐다. enabled로 끄거나 다시 켠다. announce로 팀 채널에 결과를 올릴지 정한다.',
         {
           id: z.number().int(),
           title: z.string().min(1).max(100).optional(),
           when: z.string().optional(),
           prompt: z.string().min(1).max(4000).optional(),
           enabled: z.boolean().optional(),
+          announce: z.boolean().optional(),
         },
-        async ({ id, title, when, prompt, enabled }) => {
+        async ({ id, title, when, prompt, enabled, announce }) => {
           const current = (await sql<ScheduleRow[]>`select * from schedules where id = ${id}`)[0];
           if (!current) return text(`예약 #${id}이 없다.`);
           const cron = when?.trim() ?? current.cron;
@@ -214,6 +223,7 @@ export function rinToolServer(ctx: ToolContext) {
               cron = ${cron},
               prompt = ${prompt ?? current.prompt},
               enabled = ${enabled ?? current.enabled},
+              announce = ${announce ?? current.announce},
               next_run_at = ${next},
               fail_streak = ${enabled === true ? 0 : current.fail_streak}
             where id = ${id}`;

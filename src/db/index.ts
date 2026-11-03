@@ -47,6 +47,8 @@ export type ScheduleRow = {
   next_run_at: Date;
   last_run_at: Date | null;
   fail_streak: number;
+  /** Post the run's answer to the team channel. When false, only failures are reported, by DM to the creator. */
+  announce: boolean;
   created_at: Date;
 };
 
