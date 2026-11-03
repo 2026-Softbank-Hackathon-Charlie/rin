@@ -32,6 +32,24 @@ test('a line longer than the limit is cut hard', () => {
   assert.deepEqual(chunks.map((c) => c.length), [200, 200, 50]);
 });
 
+test('the limit counts UTF-8 bytes, so Korean answers stay under Slack 4,000 bytes', () => {
+  // A 3,148-character Korean answer (5,942 bytes) was rejected by chat.update as msg_too_long.
+  const lines = Array.from({ length: 60 }, (_, i) => `${i}. 플랫폼 배포에 필요한 설정을 정리했습니다 ${'가'.repeat(40)}`);
+  const chunks = splitMessage(lines.join('\n'));
+  assert.ok(chunks.length > 1);
+  for (const c of chunks) assert.ok(Buffer.byteLength(c) <= 3900, `chunk too long: ${Buffer.byteLength(c)} bytes`);
+  assert.equal(chunks.join('\n'), lines.join('\n'));
+});
+
+test('a hard cut never splits a character', () => {
+  const chunks = splitMessage('가'.repeat(150) + '😀'.repeat(10), 200);
+  for (const c of chunks) {
+    assert.ok(Buffer.byteLength(c) <= 200);
+    assert.doesNotMatch(c, /�|[\uD800-\uDBFF]$|^[\uDC00-\uDFFF]/);
+  }
+  assert.equal(chunks.join(''), '가'.repeat(150) + '😀'.repeat(10));
+});
+
 test('tail keeps the end and starts on a line boundary', () => {
   assert.equal(tail('abc', 10), 'abc');
   assert.equal(tail('first line\nsecond line\nthird', 15), 'third');
