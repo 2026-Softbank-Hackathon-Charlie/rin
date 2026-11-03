@@ -83,11 +83,3 @@ export async function setSetting(key: string, value: string): Promise<void> {
   await sql`insert into settings (key, value) values (${key}, ${value})
             on conflict (key) do update set value = excluded.value, updated_at = now()`;
 }
-
-/** Estimated spend this month in Asia/Seoul, from the SDK cost of every finished job. */
-export async function monthCostUsd(): Promise<number> {
-  const rows = await sql<{ total: string }[]>`
-    select coalesce(sum(cost_usd), 0)::text as total from jobs
-    where created_at >= (date_trunc('month', now() at time zone 'Asia/Seoul') at time zone 'Asia/Seoul')`;
-  return Number(rows[0]?.total ?? 0);
-}

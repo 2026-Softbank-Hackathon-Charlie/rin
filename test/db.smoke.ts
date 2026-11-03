@@ -6,7 +6,7 @@ if (!/\/[^/?]+_test(\?|$)/.test(process.env.DATABASE_URL ?? '')) {
   console.error('db.smoke.ts truncates tables; point DATABASE_URL at a database named *_test');
   process.exit(1);
 }
-const { getSetting, migrate, monthCostUsd, setSetting, sql } = await import('../src/db/index.js');
+const { getSetting, migrate, setSetting, sql } = await import('../src/db/index.js');
 
 await migrate();
 await migrate(); // idempotent
@@ -51,7 +51,6 @@ assert.equal(cancelled.length, 2);
 await setSetting('model', 'claude-opus-5-5');
 await setSetting('model', 'claude-sonnet-5-5');
 assert.equal(await getSetting('model'), 'claude-sonnet-5-5');
-assert.equal(await monthCostUsd(), 0.25);
 
 // Schedules: a due schedule becomes one job; while that job is active the next round is skipped.
 const { dispatchDueSchedules } = await import('../src/worker/scheduler.js');
