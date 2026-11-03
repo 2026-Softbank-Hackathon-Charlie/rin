@@ -38,7 +38,7 @@ const allowed = (env.RIN_ALLOWED_USERS ?? Object.keys(TEAM).join(','))
 export const config = {
   channelId: env.RIN_CHANNEL_ID ?? 'C0CCZ9RJ52T',
   allowedUsers: new Set(allowed),
-  defaultModel: env.RIN_MODEL ?? 'claude-sonnet-5-5',
+  defaultModel: env.RIN_MODEL ?? 'claude-opus-5-5',
   workspaceDir: path.resolve(env.RIN_WORKSPACE ?? '/data/workspace'),
   claudeConfigDir: path.resolve(env.RIN_CLAUDE_CONFIG_DIR ?? '/data/claude'),
   /** Claude runs at once across all workers; old and new workers share it during a handoff deploy. */
