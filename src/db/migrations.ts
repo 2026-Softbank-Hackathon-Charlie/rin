@@ -97,4 +97,25 @@ export const migrations: { id: number; sql: string }[] = [
       alter table threads add column session_cost_usd numeric(10, 4);
     `,
   },
+  {
+    id: 5,
+    sql: `
+      -- Read-only login for psql in Claude's Bash. The worker sets its password at start (src/db/reader.ts).
+      -- Roles are cluster-wide, so another database on the same server may have made it already.
+      do $$
+      begin
+        if not exists (select from pg_roles where rolname = 'rin_reader') then
+          create role rin_reader login nosuperuser nocreatedb nocreaterole noreplication connection limit 4;
+        end if;
+      end $$;
+      alter role rin_reader set default_transaction_read_only = on;
+      alter role rin_reader set statement_timeout = '15s';
+      grant usage on schema public to rin_reader;
+      grant select on all tables in schema public to rin_reader;
+      -- Tables that later migrations add (created by the main role) are readable too.
+      alter default privileges in schema public grant select on tables to rin_reader;
+      -- No temp tables either: the reader writes nothing.
+      do $$ begin execute format('revoke temporary on database %I from public', current_database()); end $$;
+    `,
+  },
 ];
