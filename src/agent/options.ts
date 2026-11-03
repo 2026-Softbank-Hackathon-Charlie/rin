@@ -86,6 +86,7 @@ export function buildOptions(p: {
   return {
     cwd: config.workspaceDir,
     model: p.model,
+    effort: config.effort,
     permissionMode: 'bypassPermissions',
     allowDangerouslySkipPermissions: true,
     settingSources: ['user', 'project'],

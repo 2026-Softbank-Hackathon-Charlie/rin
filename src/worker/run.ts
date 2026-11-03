@@ -9,7 +9,7 @@ import { logLines } from '../agent/logfmt.js';
 import { buildOptions } from '../agent/options.js';
 import { rinToolServer } from '../agent/tools.js';
 import { statusBlocks } from '../slack/blocks.js';
-import { formatDuration, formatUsd, splitMessage, tail } from '../slack/text.js';
+import { formatDuration, formatUsd, modelLabel, splitMessage, tail } from '../slack/text.js';
 import { fetchAttachments, threadDir } from './attachments.js';
 import { StatusMessage } from './status.js';
 import { requeueForResume } from './coord.js';
@@ -140,6 +140,7 @@ async function runSlackJob(job: Job, deps: Deps): Promise<void> {
   const threadTs = job.thread_ts;
   const started = Date.now();
   const model = (await getSetting('model')) ?? config.defaultModel;
+  const label = modelLabel(model, config.effort);
   const status = job.status_ts ? new StatusMessage(client, job.channel, job.status_ts) : undefined;
 
   let log = '';
@@ -148,7 +149,7 @@ async function runSlackJob(job: Job, deps: Deps): Promise<void> {
     text: header.replace(/\*/g, ''),
     blocks: statusBlocks({ header, log: tail(log, config.logTailChars), jobId: job.id, cancellable }),
   });
-  status?.push(frame(job.resumed > 0 ? `*Rin* 이어서 진행하는 중 | ${model}` : `*Rin* 시작하는 중 | ${model}`, true));
+  status?.push(frame(job.resumed > 0 ? `*Rin* 이어서 진행하는 중 | ${label}` : `*Rin* 시작하는 중 | ${label}`, true));
 
   const thread = (await sql<ThreadRow[]>`select * from threads where thread_ts = ${threadTs}`)[0];
   const messages = await fetchThread(client, job.channel, threadTs);
@@ -185,7 +186,7 @@ async function runSlackJob(job: Job, deps: Deps): Promise<void> {
       onLog: (lines, n) => {
         toolCalls += n;
         log = tail(log + lines.join('\n') + '\n', config.logTailChars * 4);
-        status?.push(frame(`*Rin* 작업 중 | 도구 ${toolCalls}회 | ${formatDuration(Date.now() - started)} | ${model}`, true));
+        status?.push(frame(`*Rin* 작업 중 | 도구 ${toolCalls}회 | ${formatDuration(Date.now() - started)} | ${label}`, true));
       },
     });
 
@@ -226,7 +227,7 @@ async function runSlackJob(job: Job, deps: Deps): Promise<void> {
 
   if (exec.result?.subtype === 'success') {
     await sql`update jobs set status = 'done', cost_usd = coalesce(cost_usd, 0) + ${cost ?? 0}, finished_at = now() where id = ${job.id}`;
-    const footer = `_소요 ${elapsed} | 이번 ${formatUsd(cost ?? 0)} | ${model}_`;
+    const footer = `_소요 ${elapsed} | 이번 ${formatUsd(cost ?? 0)} | ${label}_`;
     const [head, ...rest] = splitMessage(`${exec.result.result.trim() || '(답이 비어 있다)'}\n\n${footer}`);
     if (status) await status.close({ text: head ?? footer, blocks: [] });
     else await client.chat.postMessage({ channel: job.channel, thread_ts: threadTs, text: head ?? footer });
@@ -245,6 +246,7 @@ async function runScheduleJob(job: Job, deps: Deps): Promise<void> {
   const { client, handle } = deps;
   const started = Date.now();
   const model = (await getSetting('model')) ?? config.defaultModel;
+  const label = modelLabel(model, config.effort);
   const schedule = job.schedule_id ? (await sql<ScheduleRow[]>`select * from schedules where id = ${job.schedule_id}`)[0] : undefined;
   const title = schedule?.title ?? `예약 작업 ${job.schedule_id ?? ''}`.trim();
   const env = await toolEnv();
@@ -272,7 +274,7 @@ async function runScheduleJob(job: Job, deps: Deps): Promise<void> {
   }
 
   if (exec.result?.subtype === 'success') {
-    const footer = `_예약 #${job.schedule_id} | 소요 ${elapsed} | 이번 ${formatUsd(cost ?? 0)} | ${model}_`;
+    const footer = `_예약 #${job.schedule_id} | 소요 ${elapsed} | 이번 ${formatUsd(cost ?? 0)} | ${label}_`;
     const [head, ...rest] = splitMessage(`*[예약] ${title}*\n${exec.result.result.trim() || '(답이 비어 있다)'}\n\n${footer}`);
     const posted = await client.chat.postMessage({ channel: job.channel, text: head ?? footer });
     const ts = posted.ts!;

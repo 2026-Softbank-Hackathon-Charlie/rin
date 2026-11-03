@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { formatDuration, splitMessage, tail } from '../src/slack/text.js';
+import { formatDuration, modelLabel, splitMessage, tail } from '../src/slack/text.js';
 
 test('short text stays in one chunk', () => {
   assert.deepEqual(splitMessage('hello\nworld', 100), ['hello\nworld']);
@@ -59,4 +59,13 @@ test('durations read naturally', () => {
   assert.equal(formatDuration(5_000), '5초');
   assert.equal(formatDuration(135_000), '2분 15초');
   assert.equal(formatDuration(3_780_000), '1시간 3분');
+});
+
+test('model ids become readable names with the effort', () => {
+  assert.equal(modelLabel('claude-opus-5-5', 'xhigh'), 'Opus 5.5 (XHigh)');
+  assert.equal(modelLabel('claude-sonnet-5-5', 'high'), 'Sonnet 5.5 (High)');
+  assert.equal(modelLabel('claude-opus-5', 'max'), 'Opus 5 (Max)');
+  assert.equal(modelLabel('claude-haiku-4-5-20251001', 'medium'), 'Haiku 4.5 (Medium)');
+  assert.equal(modelLabel('claude-opus-4-20250514', 'low'), 'Opus 4 (Low)');
+  assert.equal(modelLabel('claude-3-5-sonnet-20241022', 'high'), 'claude-3-5-sonnet-20241022 (High)');
 });
