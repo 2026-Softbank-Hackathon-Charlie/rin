@@ -1,6 +1,6 @@
 # Rin AWS 배포
 
-Rin을 EC2 한 대에서 Docker Compose(`deploy/compose.yaml`)로 띄운다. main에 머지하면 `.github/workflows/deploy.yml`이 이미지를 ECR `hopcharlie/rin:<sha>`에 올리고, SSM Run Command로 호스트에서 `deploy/ec2/deploy.sh`를 실행한다.
+Rin을 EC2 한 대에서 Docker Compose(`deploy/compose.db.yaml`, `deploy/compose.app.yaml`)로 띄운다. main에 머지하면 `.github/workflows/deploy.yml`이 이미지를 ECR `hopcharlie/rin:<sha>`에 올리고, SSM Run Command로 호스트에서 `deploy/ec2/deploy.sh`를 실행한다.
 
 ## 만드는 것
 

@@ -48,6 +48,8 @@ export function buildPrompt(p: {
   botUserId: string;
   hasSession: boolean;
   place?: 'channel' | 'dm';
+  /** The previous run of this same request was cut off by a redeploy and is being resumed. */
+  resuming?: boolean;
   now?: Date;
 }): string {
   const team = config.allowedUsers;
@@ -80,7 +82,13 @@ export function buildPrompt(p: {
 
   const request = clean(trigger?.text ?? '', p.botUserId).replace(/^@Rin\s*/, '');
   const files = trigger?.files?.length ? `\n(첨부 파일 ${trigger.files.length}개는 아직 읽을 수 없다)` : '';
-  parts.push(`[지시] 이번 요청, ${displayName(trigger?.user)}\n${request}${files}`);
+  if (p.resuming) {
+    parts.push(
+      `[지시] 재배포로 이 요청의 앞선 실행이 중간에 멈췄다. 아래 요청을 이어서 마무리한다. 이미 끝낸 일(커밋, push, PR, 메시지, 예약 등록)은 반복하지 말고, 대화 기록과 실제 상태(git, PR 목록)를 확인해 남은 일만 한다.\n요청자: ${displayName(trigger?.user)}\n${request}${files}`,
+    );
+  } else {
+    parts.push(`[지시] 이번 요청, ${displayName(trigger?.user)}\n${request}${files}`);
+  }
   return parts.join('\n\n');
 }
 

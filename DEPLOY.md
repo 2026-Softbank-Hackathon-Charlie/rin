@@ -4,23 +4,35 @@
 
 ## 현재 상태
 
-- 1단계 배포 구성은 레포에 있다. EC2와 IAM 역할을 처음 만드는 순서는 `deploy/aws/README.md`에 있다.
-- EC2를 띄우기 전까지는 로컬 Docker(`compose.dev.yaml`의 app 프로필)에서 돈다.
-- 같은 Slack 앱으로 두 곳에서 동시에 띄우면 이벤트가 나뉘어 들어간다. EC2에 배포하기 전에 로컬 gateway와 worker를 멈춘다.
+- EC2 `i-05d4ba044ec963ed0`(서울)에서 돈다. 인프라는 `deploy/aws/`의 Terraform으로 관리하고, 처음 만드는 순서는 `deploy/aws/README.md`에 있다.
+- 같은 Slack 앱으로 로컬과 EC2를 동시에 띄우지 않는다. 로컬 시험이 필요하면 EC2 쪽을 먼저 멈춘다.
 
-## 1단계: EC2와 GitHub Actions
+## 배포 흐름 (교대 배포)
 
-- main에 머지하면 `.github/workflows/deploy.yml`이 동작한다.
-  1. GitHub OIDC로 AWS 역할 `rin-deploy`를 받는다.
-  2. 이미지를 빌드해 ECR `hopcharlie/rin:<커밋 sha>`에 올린다.
-  3. SSM Run Command로 EC2에서 새 이미지의 `deploy/ec2/deploy.sh`와 `deploy/compose.yaml`을 꺼내 `/srv/rin`에 두고 `deploy.sh`를 실행한다.
-- `deploy.sh`는 SSM `/rin/*`의 비밀값을 `/run/rin.env`에 쓰고, `docker compose`로 gateway와 worker를 새 이미지로 바꾼다. postgres는 그대로 둔다.
-- 두 컨테이너가 180초 안에 healthy가 되지 않으면 직전 이미지로 되돌리고 Actions 실행을 실패로 끝낸다.
+main에 머지하면 `.github/workflows/deploy.yml`이 동작한다.
+
+1. GitHub OIDC로 AWS 역할 `rin-deploy`를 받는다.
+2. 이미지를 빌드해 ECR `hopcharlie/rin:<커밋 sha>`에 올린다.
+3. SSM Run Command로 EC2에서 새 이미지의 `deploy/ec2/deploy.sh`, `deploy/compose.db.yaml`, `deploy/compose.app.yaml`을 꺼내 `/srv/rin`에 두고 `deploy.sh`를 실행한다.
+
+`deploy.sh`는 돌고 있는 Rin을 끊지 않고 새 버전으로 넘긴다.
+
+1. postgres는 compose 프로젝트 `rin`(`compose.db.yaml`)으로 배포와 상관없이 계속 돈다.
+2. 새 gateway와 worker를 프로젝트 `rin-<sha 7자리>`로 옛 버전 옆에 띄운다.
+3. 180초 안에 healthy가 되지 않으면 새 컨테이너만 지우고 실패로 끝낸다. 옛 버전은 그대로 일하므로 이것이 롤백이다.
+4. healthy가 되면 옛 gateway를 지운다. Socket Mode는 연결 여러 개를 허용하고 이벤트 하나를 그중 한 곳에만 보내므로, 겹치는 동안 멘션이 유실되지 않는다.
+5. 옛 worker에는 SIGTERM을 보내고 재시작하지 않게 한다. 옛 worker는 새 작업을 받지 않고, 하던 작업을 최대 2시간까지 마친 뒤 스스로 종료한다.
+
+## worker 사이의 약속
+
+- 동시 실행 상한(4개)은 프로세스가 아니라 DB에서 실행 중인 작업 전체를 센다. 옛 worker와 새 worker가 겹쳐도 Claude 실행은 4개를 넘지 않는다.
+- 예약 디스패치, 레포 동기화, worktree 정리, 죽은 worker 작업 회수는 리더만 한다. 리더는 drain 중이 아니고 하트비트가 살아 있는 worker 중 가장 늦게 시작한 것이다(`workers` 테이블).
+- 같은 clone에 대한 git 작업은 Postgres advisory lock으로 worker 사이에서도 한 번에 하나만 돈다.
+- 2시간 안에 끝나지 않은 작업은 큐에 다시 넣고, 새 worker가 같은 Claude 세션을 이어서 마무리한다. 하트비트가 90초 넘게 끊긴 worker(크래시, 재부팅)의 작업도 같은 방법으로 이어 간다. 자동 재개는 작업마다 한 번만 하고, 그다음에는 "중단"으로 끝낸다.
 - 배포 결과는 Slack에 알리지 않는다. GitHub Actions의 deploy 실행 결과와 로그로 확인한다.
-- worker는 종료 신호를 받으면 실행 중인 작업을 최대 4분 동안 마무리한다.
-- 인프라(EC2, ECR, IAM 역할, `rin-ai` 사용자)는 `deploy/aws/`의 Terraform으로 관리한다. state는 `hopcharlie-tfstate-525091405886-apne2` 버킷의 `rin/terraform.tfstate`에 있다.
 
 ## Rin이 자기 레포를 고칠 때
 
-- 코드 변경은 `rin/` 브랜치와 PR로 올린다. 머지되면 위 워크플로가 몇 분 안에 배포한다.
-- `deploy/ec2/deploy.sh`나 `deploy/compose.yaml`이 깨지면 되돌리기도 동작하지 않을 수 있다. 이 두 파일을 고칠 때는 PR 본문에 그 사실을 밝힌다.
+- 코드 변경은 `rin/` 브랜치와 PR로 올린다. 머지되면 위 흐름으로 몇 분 안에 배포된다. 이번 실행은 옛 worker에서 끝까지 마무리된다.
+- `deploy/ec2/deploy.sh`나 compose 파일이 깨지면 새 버전이 뜨지 않을 뿐 옛 버전은 계속 돈다. 그래도 이 파일들을 고칠 때는 PR 본문에 그 사실을 밝힌다.
+- `compose.db.yaml`의 postgres 정의를 바꾸면 DB 컨테이너가 다시 만들어진다. 꼭 필요할 때만 바꾼다.

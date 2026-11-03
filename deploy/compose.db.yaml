@@ -1,0 +1,20 @@
+# Postgres for Rin on the EC2 host, compose project "rin". It keeps running across deploys;
+# each Rin version runs as its own project from compose.app.yaml and joins the network rin_default.
+#   docker compose -p rin -f compose.db.yaml --env-file /run/rin.env up -d
+# /run/rin.env holds the secrets read from SSM (/rin/*), including POSTGRES_PASSWORD.
+# Keep this service definition stable: a change makes compose recreate the database container.
+name: rin
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: rin
+      POSTGRES_DB: rin
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is not set}
+    volumes:
+      - /srv/rin/pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rin"]
+      interval: 5s
+      retries: 30

@@ -3,6 +3,7 @@ import { config, healthPort, need } from '../config.js';
 import { migrate, sql, type Job } from '../db/index.js';
 import { startHealthServer } from '../health.js';
 import { statusBlocks } from '../slack/blocks.js';
+import { claimNext, forgetOldWorkers, heartbeat, isLeader, jobsOfDeadWorkers, leaveWorkers, requeueForResume, workerId } from './coord.js';
 import { cleanupWorktrees, syncRepos } from './repos.js';
 import { runJob, type RunHandle } from './run.js';
 import { dispatchDueSchedules } from './scheduler.js';
@@ -14,37 +15,16 @@ let botUserId = '';
 let draining = false;
 let ticking = false;
 let lastTick = Date.now();
+let lastHeartbeat = 0;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const errText = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
-async function markMessage(job: Job, header: string): Promise<void> {
+async function markMessage(job: Job, header: string, cancellable = false): Promise<void> {
   if (!job.status_ts) return;
   await client.chat
-    .update({ channel: job.channel, ts: job.status_ts, text: header.replace(/\*/g, ''), blocks: statusBlocks({ header, cancellable: false }) })
+    .update({ channel: job.channel, ts: job.status_ts, text: header.replace(/\*/g, ''), blocks: statusBlocks({ header, jobId: job.id, cancellable }) })
     .catch((err) => console.error('could not update status message', err?.data?.error ?? err));
-}
-
-/** Jobs left running by a crash or kill are closed as interrupted on start. */
-async function recoverInterrupted(): Promise<void> {
-  const stale = await sql<Job[]>`
-    update jobs set status = 'interrupted', finished_at = now() where status = 'running' returning *`;
-  for (const job of stale) await markMessage(job, '*Rin* 재시작으로 중단됨');
-}
-
-/** Takes the oldest queued job whose thread has nothing running. */
-async function claim(): Promise<Job | undefined> {
-  const rows = await sql<Job[]>`
-    update jobs set status = 'running', started_at = now()
-    where id = (
-      select j.id from jobs j
-      where j.status = 'queued'
-        and (j.kind <> 'slack' or j.status_ts is not null)
-        and not exists (select 1 from jobs r where r.status = 'running' and r.thread_ts = j.thread_ts)
-      order by j.id
-      limit 1
-      for update skip locked)
-    returning *`;
-  return rows[0];
 }
 
 function start(job: Job): void {
@@ -60,11 +40,16 @@ function start(job: Job): void {
     .finally(() => handles.delete(job.id));
 }
 
+/** Every second: heartbeat, cancellations, and new jobs while the global limit allows. */
 async function tick(): Promise<void> {
   if (ticking) return;
   ticking = true;
   lastTick = Date.now();
   try {
+    if (Date.now() - lastHeartbeat > 5000) {
+      await heartbeat(draining);
+      lastHeartbeat = Date.now();
+    }
     if (handles.size > 0) {
       const ids = [...handles.keys()];
       const rows = await sql<{ id: number; cancel_requested_by: string }[]>`
@@ -77,31 +62,57 @@ async function tick(): Promise<void> {
         }
       }
     }
-    while (!draining && handles.size < config.concurrency) {
-      const job = await claim();
+    while (!draining) {
+      const job = await claimNext(config.concurrency);
       if (!job) break;
       start(job);
     }
   } catch (err) {
-    console.error('tick failed', err);
+    console.error('tick failed', errText(err));
   } finally {
     ticking = false;
   }
 }
 
+/** Jobs of a worker that died without draining (crash, kill, reboot) are queued again to resume once. */
+async function reapDeadWorkers(): Promise<void> {
+  for (const job of await jobsOfDeadWorkers()) {
+    const requeued = await requeueForResume(job.id, null);
+    console.warn(`job ${job.id} of dead worker ${job.worker_id}: ${requeued ? 'queued to resume' : 'interrupted'}`);
+    await markMessage(job, requeued ? '*Rin* 재시작으로 잠시 멈춤 | 곧 이어서 진행합니다' : '*Rin* 재시작으로 중단됨', requeued);
+  }
+  await forgetOldWorkers();
+}
+
+/** Work that must happen once across workers runs only on the leader. */
+function leaderTask(name: string, intervalMs: number, fn: () => Promise<void>): void {
+  const run = async () => {
+    if (draining || !(await isLeader())) return;
+    await fn();
+  };
+  setInterval(() => void run().catch((err) => console.error(`${name} failed`, errText(err))), intervalMs);
+}
+
+/**
+ * Stop signal, also sent by deploy.sh to the old worker of a handoff: take no new jobs, let running ones
+ * finish (up to RIN_DRAIN_MS, 2 hours by default), queue whatever is left to resume on the new worker, exit.
+ */
 async function shutdown(signal: string): Promise<void> {
   if (draining) return;
   draining = true;
-  console.log(`${signal}: no new jobs, waiting up to ${config.drainMs / 1000}s for ${handles.size} running job(s)`);
+  console.log(`${signal}: draining, ${handles.size} running job(s), up to ${Math.round(config.drainMs / 60_000)} min`);
+  await heartbeat(true).catch(() => {});
   const deadline = Date.now() + config.drainMs;
   while (handles.size > 0 && Date.now() < deadline) await sleep(1000);
   for (const handle of handles.values()) {
     handle.reason = { kind: 'shutdown' };
     handle.controller.abort();
   }
-  const hardStop = Date.now() + 15_000;
+  const hardStop = Date.now() + 30_000;
   while (handles.size > 0 && Date.now() < hardStop) await sleep(500);
+  await leaveWorkers().catch(() => {});
   await sql.end({ timeout: 5 });
+  console.log('drained, exiting');
   process.exit(0);
 }
 
@@ -109,17 +120,17 @@ async function main(): Promise<void> {
   await migrate();
   ensureWorkspace();
   botUserId = (await client.auth.test()).user_id ?? '';
-  await recoverInterrupted();
+  await heartbeat(false);
+  lastHeartbeat = Date.now();
   startHealthServer(healthPort('worker'), () => Date.now() - lastTick < 15_000);
   setInterval(() => void tick(), 1000);
-  const background = (name: string, fn: () => Promise<void>) => () =>
-    void fn().catch((err) => console.error(`${name} failed`, err instanceof Error ? err.message : err));
-  setInterval(background('schedules', () => (draining ? Promise.resolve() : dispatchDueSchedules())), 30_000);
-  setInterval(background('worktree cleanup', cleanupWorktrees), 3600_000);
-  background('repo sync', () => syncRepos(true))();
+  leaderTask('schedules', 30_000, () => dispatchDueSchedules());
+  leaderTask('reaper', 30_000, reapDeadWorkers);
+  leaderTask('repo sync', 5 * 60_000, () => syncRepos(true));
+  leaderTask('worktree cleanup', 3600_000, cleanupWorktrees);
   process.on('SIGTERM', () => void shutdown('SIGTERM'));
   process.on('SIGINT', () => void shutdown('SIGINT'));
-  console.log(`worker ready: concurrency ${config.concurrency}, workspace ${config.workspaceDir}`);
+  console.log(`worker ${workerId} ready: concurrency ${config.concurrency} across workers, workspace ${config.workspaceDir}`);
 }
 
 main().catch((err) => {

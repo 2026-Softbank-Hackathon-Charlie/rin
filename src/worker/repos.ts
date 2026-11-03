@@ -24,12 +24,17 @@ async function git(args: string[], token: string, cwd?: string): Promise<string>
 const reposDir = () => path.join(config.workspaceDir, 'repos');
 const worktreesDir = () => path.join(config.workspaceDir, 'worktrees');
 
-/** Serialises git operations per key (a repo name), because git takes locks on the shared .git directory. */
-const locks = new Map<string, Promise<unknown>>();
-function withLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
-  const next = (locks.get(key) ?? Promise.resolve()).then(fn, fn);
-  locks.set(key, next.catch(() => {}));
-  return next;
+/**
+ * Serialises git operations on one clone across every worker process (old and new overlap during a
+ * handoff deploy), because git takes locks on the shared .git directory. Uses a Postgres advisory lock
+ * held for the duration of `fn`.
+ */
+async function withLock<T>(repo: string, fn: () => Promise<T>): Promise<T> {
+  const result = await sql.begin(async (tx) => {
+    await tx`select pg_advisory_xact_lock(hashtext(${`rin-repo:${repo}`}))`;
+    return { value: await fn() };
+  });
+  return (result as { value: T }).value;
 }
 
 let known: RepoInfo[] = [];
@@ -43,24 +48,23 @@ export async function syncRepos(force = false): Promise<void> {
   lastSync = Date.now();
   known = await installationRepos(token);
   fs.mkdirSync(reposDir(), { recursive: true });
-  await Promise.all(
-    known.map((repo) =>
-      withLock(repo.name, async () => {
-        const dir = path.join(reposDir(), repo.name);
-        try {
-          if (!fs.existsSync(path.join(dir, '.git'))) {
-            await git(['clone', '--quiet', `https://github.com/${GITHUB_ORG}/${repo.name}.git`, dir], token);
-          } else {
-            await git(['fetch', '--quiet', '--prune', 'origin'], token, dir);
-            await git(['checkout', '--quiet', '-f', '-B', repo.default_branch, `origin/${repo.default_branch}`], token, dir);
-            await git(['clean', '-fdq'], token, dir);
-          }
-        } catch (err) {
-          console.error(`repo sync failed for ${repo.name}`, err instanceof Error ? err.message : err);
+  // One repo at a time: each holds a database connection for its lock.
+  for (const repo of known) {
+    await withLock(repo.name, async () => {
+      const dir = path.join(reposDir(), repo.name);
+      try {
+        if (!fs.existsSync(path.join(dir, '.git'))) {
+          await git(['clone', '--quiet', `https://github.com/${GITHUB_ORG}/${repo.name}.git`, dir], token);
+        } else {
+          await git(['fetch', '--quiet', '--prune', 'origin'], token, dir);
+          await git(['checkout', '--quiet', '-f', '-B', repo.default_branch, `origin/${repo.default_branch}`], token, dir);
+          await git(['clean', '-fdq'], token, dir);
         }
-      }),
-    ),
-  );
+      } catch (err) {
+        console.error(`repo sync failed for ${repo.name}`, err instanceof Error ? err.message : err);
+      }
+    });
+  }
 }
 
 export function knownRepos(): string[] {

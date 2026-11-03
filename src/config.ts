@@ -41,11 +41,15 @@ export const config = {
   defaultModel: env.RIN_MODEL ?? 'claude-sonnet-5-5',
   workspaceDir: path.resolve(env.RIN_WORKSPACE ?? '/data/workspace'),
   claudeConfigDir: path.resolve(env.RIN_CLAUDE_CONFIG_DIR ?? '/data/claude'),
+  /** Claude runs at once across all workers; old and new workers share it during a handoff deploy. */
   concurrency: int('RIN_CONCURRENCY', 4),
   logTailChars: int('RIN_LOG_TAIL_CHARS', 1500),
   maxTurns: int('RIN_MAX_TURNS', 150),
   maxBudgetUsd: int('RIN_MAX_BUDGET_USD', 5),
-  drainMs: int('RIN_DRAIN_MS', 240_000),
+  /** How long a worker told to stop keeps finishing its jobs. Unfinished jobs are then queued to resume. */
+  drainMs: int('RIN_DRAIN_MS', 2 * 3600_000),
+  /** Short commit of the running image; set by deploy.sh. */
+  version: env.RIN_VERSION ?? 'dev',
 };
 
 export const GITHUB_ORG = env.RIN_GITHUB_ORG ?? '2026-Softbank-Hackathon-Charlie';

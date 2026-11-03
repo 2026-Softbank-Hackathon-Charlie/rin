@@ -77,6 +77,48 @@ const [onceRow] = await sql<{ enabled: boolean }[]>`select enabled from schedule
 assert.equal(onceRow!.enabled, false);
 await sql`truncate jobs, schedules restart identity cascade`;
 
+// Handoff deploy coordination.
+const coord = await import('../src/worker/coord.js');
+await sql`truncate workers`;
+await coord.heartbeat(false);
+assert.equal(await coord.isLeader(), true, 'the only live worker leads');
+await sql`insert into workers (id, version, started_at) values ('newer', 'b', now() + interval '1 second')`;
+assert.equal(await coord.isLeader(), false, 'a newer live worker takes over');
+await sql`update workers set draining = true where id = 'newer'`;
+assert.equal(await coord.isLeader(), true, 'a draining worker never leads');
+await sql`update workers set draining = false, heartbeat_at = now() - interval '1 minute' where id = 'newer'`;
+assert.equal(await coord.isLeader(), true, 'a stale worker never leads');
+
+// The concurrency limit counts running jobs of every worker.
+const queue = (ts: string) => sql`
+  insert into jobs (kind, channel, thread_ts, trigger_ts, requester, prompt, status_ts)
+  values ('slack', 'C1', ${ts}, ${ts}, 'U1', 'p', 'x')`;
+await queue('10.0');
+await queue('11.0');
+await queue('12.0');
+await sql`update jobs set status = 'running', worker_id = 'other' where trigger_ts = '10.0'`;
+const first = await coord.claimNext(2);
+assert.equal(first?.worker_id, coord.workerId);
+assert.equal(await coord.claimNext(2), undefined, 'two running across workers is the limit');
+
+// A cut-off job is queued again once, then ends as interrupted.
+assert.equal(await coord.requeueForResume(first!.id, 0.1), true);
+const [again] = await sql<{ status: string; resumed: number; worker_id: string | null }[]>`select status, resumed, worker_id from jobs where id = ${first!.id}`;
+assert.deepEqual(again, { status: 'queued', resumed: 1, worker_id: null });
+await sql`update jobs set status = 'running' where id = ${first!.id}`;
+assert.equal(await coord.requeueForResume(first!.id, 0.1), false);
+const [done] = await sql<{ status: string; cost_usd: string }[]>`select status, cost_usd from jobs where id = ${first!.id}`;
+assert.equal(done!.status, 'interrupted');
+assert.equal(Number(done!.cost_usd), 0.2, 'cost adds up across runs');
+
+// Running jobs of a worker without a fresh heartbeat are found; this worker's and pre-handoff jobs are not.
+await sql`update jobs set status = 'running', worker_id = 'gone' where trigger_ts = '11.0'`;
+await sql`update jobs set status = 'running', worker_id = null where trigger_ts = '12.0'`;
+const dead = await coord.jobsOfDeadWorkers();
+assert.deepEqual(dead.map((j) => j.trigger_ts), ['10.0', '11.0']);
+await coord.leaveWorkers();
+await sql`truncate jobs, workers restart identity`;
+
 await sql`truncate jobs, threads, settings restart identity`;
 await sql.end();
 console.log('db smoke test passed');

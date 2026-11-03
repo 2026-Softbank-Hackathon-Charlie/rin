@@ -74,4 +74,20 @@ export const migrations: { id: number; sql: string }[] = [
       alter table threads drop column branch;
     `,
   },
+  {
+    id: 3,
+    sql: `
+      -- Handoff deploys run old and new workers side by side; each worker heartbeats here.
+      create table workers (
+        id text primary key,
+        version text not null,
+        started_at timestamptz not null default now(),
+        heartbeat_at timestamptz not null default now(),
+        draining boolean not null default false
+      );
+      alter table jobs add column worker_id text;
+      -- How many times the job was queued again after a redeploy or crash cut it off.
+      alter table jobs add column resumed int not null default 0;
+    `,
+  },
 ];

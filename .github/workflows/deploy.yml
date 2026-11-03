@@ -52,7 +52,7 @@ jobs:
           IMAGE: ${{ steps.image.outputs.image }}
           INSTANCE_ID: ${{ vars.RIN_INSTANCE_ID }}
         run: |
-          # Runs as root on the host. deploy.sh and compose.yaml come from the
+          # Runs as root on the host. deploy.sh and the compose files come from the
           # image itself, so the host always runs the scripts of the version it deploys.
           params="$(jq -cn --arg image "$IMAGE" '{commands: [
             "set -eu",
@@ -62,7 +62,8 @@ jobs:
             "docker pull -q \"$image\"",
             "cid=$(docker create \"$image\")",
             "docker cp \"$cid:/app/deploy/ec2/deploy.sh\" /srv/rin/deploy.sh",
-            "docker cp \"$cid:/app/deploy/compose.yaml\" /srv/rin/compose.yaml",
+            "docker cp \"$cid:/app/deploy/compose.db.yaml\" /srv/rin/compose.db.yaml",
+            "docker cp \"$cid:/app/deploy/compose.app.yaml\" /srv/rin/compose.app.yaml",
             "docker rm \"$cid\" >/dev/null",
             "bash /srv/rin/deploy.sh \"$image\""
           ]}')"
