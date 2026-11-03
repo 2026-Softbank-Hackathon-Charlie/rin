@@ -2,6 +2,7 @@ import { query, type SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { WebClient } from '@slack/web-api';
 import { aiAwsEnv, config, displayName, need } from '../config.js';
 import { getSetting, sql, type Job, type ScheduleRow, type ThreadRow } from '../db/index.js';
+import { readerEnv } from '../db/reader.js';
 import { botIdentity, installationToken } from '../github/app.js';
 import { asksForMerge } from '../agent/guards.js';
 import { logLines } from '../agent/logfmt.js';
@@ -51,9 +52,9 @@ function failureReason(result: SDKResultMessage | undefined, error: unknown): st
   return '결과 없이 끝났다';
 }
 
-/** Environment for the Claude process: GitHub installation token and bot identity, view-only AWS keys. */
+/** Environment for the Claude process: GitHub installation token and bot identity, view-only AWS keys, read-only DB login. */
 async function toolEnv(): Promise<Record<string, string>> {
-  const env: Record<string, string> = { ...aiAwsEnv() };
+  const env: Record<string, string> = { ...aiAwsEnv(), ...readerEnv() };
   try {
     const token = await installationToken();
     if (token) {
