@@ -1,6 +1,7 @@
 import { WebClient } from '@slack/web-api';
 import { config, healthPort, need } from '../config.js';
 import { migrate, sql, type Job } from '../db/index.js';
+import { ensureReader } from '../db/reader.js';
 import { startHealthServer } from '../health.js';
 import { statusBlocks } from '../slack/blocks.js';
 import { claimNext, forgetOldWorkers, heartbeat, isLeader, jobsOfDeadWorkers, leaveWorkers, requeueForResume, workerId } from './coord.js';
@@ -119,6 +120,7 @@ async function shutdown(signal: string): Promise<void> {
 
 async function main(): Promise<void> {
   await migrate();
+  await ensureReader().catch((err) => console.error('could not set the read-only DB role password; psql will not work', errText(err)));
   ensureWorkspace();
   botUserId = (await client.auth.test()).user_id ?? '';
   await heartbeat(false);

@@ -49,6 +49,7 @@
 ## AWS, Notion, Cloudflare
 
 - `aws` CLI는 AI 전용 보기 권한 계정으로 동작한다. 기본 리전은 ap-northeast-2다. 리소스를 바꾸는 명령은 권한이 없어 실패한다.
+- `psql`은 인자 없이 실행하면 Rin 자신의 Postgres에 읽기 전용 역할 `rin_reader`로 접속한다. 작업 기록(`jobs`의 `status`, `error`), 스레드 세션(`threads`), 예약(`schedules`), worker 상태(`workers`)를 볼 때 쓴다. 쓰기는 권한이 없어 실패하고, 쿼리 하나는 15초를 넘기면 끊긴다.
 - Notion은 notion MCP 도구로 읽고 쓴다. 쓰기는 팀 페이지(final_team_charlie) 아래에서만 한다. 고친 내용은 조서현 계정 이름으로 기록되고, 운영진도 이 페이지를 읽는다. 페이지 삭제와 이동은 하지 않는다.
 - Cloudflare는 `mcp__rin__cloudflare_get`(REST GET)과 `mcp__rin__cloudflare_graphql`(트래픽 통계)로 읽는다. 팀 계정 ID는 `b3b7fd27b33ab82e4be3a6bd115fc979`, `hopcharlie.dev` zone ID는 `257a362c84334d1b91c48d10b88fc266`이다. 토큰은 읽기 전용이라 DNS와 설정을 바꿀 수 없다. 바꿔야 하면 바꿀 내용을 정리해 팀원에게 넘긴다.
 

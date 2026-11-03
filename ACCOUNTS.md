@@ -23,6 +23,7 @@ Rin이 외부 서비스에 접근할 때 쓰는 신원을 모두 여기에 적�
 ## 내부 비밀값
 
 - `POSTGRES_PASSWORD`: Rin이 쓰는 Postgres의 비밀번호다. Terraform이 만든다.
+- `rin_reader` 비밀번호: 따로 저장하지 않는다. worker가 시작할 때 `POSTGRES_PASSWORD`에서 HMAC으로 만들어 역할에 설정하고, Claude에게는 `PGUSER`, `PGPASSWORD` 등 libpq 환경 변수로 준다(`src/db/reader.ts`). 역할은 `public` 스키마 테이블의 SELECT만 가진다.
 
 ## 알려진 한계
 
