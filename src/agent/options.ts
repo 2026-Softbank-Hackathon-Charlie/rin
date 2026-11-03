@@ -22,7 +22,7 @@ const DISALLOWED_TOOLS = [
 const PASS_THROUGH = ['PATH', 'HOME', 'USERPROFILE', 'SystemRoot', 'SYSTEMROOT', 'PATHEXT', 'ComSpec', 'TEMP', 'TMP', 'APPDATA', 'LOCALAPPDATA', 'LANG'];
 
 /** Files under prompts/ appended to the Claude Code system prompt, in this order. */
-export const PROMPT_FILES = ['rin.md', 'hackathon.md', 'korean.md', 'karpathy.md', 'persona.md'];
+export const PROMPT_FILES = ['rin.md', 'hackathon.md', 'korean.md', 'karpathy.md'];
 
 let cachedPrompt: string | undefined;
 export function systemAppend(): string {
