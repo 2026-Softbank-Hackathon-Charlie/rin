@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import type { EffortLevel } from '@anthropic-ai/claude-agent-sdk';
 
 const env = process.env;
 
@@ -49,6 +50,8 @@ export const config = {
   channelId: env.RIN_CHANNEL_ID ?? 'C0CCZ9RJ52T',
   allowedUsers: new Set(allowed),
   defaultModel: env.RIN_MODEL ?? 'claude-opus-5-5',
+  /** Reasoning effort of every run. Left unset, Claude Code runs Opus 5.5 at medium and answers after a shallow look. */
+  effort: 'xhigh' as EffortLevel,
   workspaceDir: path.resolve(env.RIN_WORKSPACE ?? '/data/workspace'),
   claudeConfigDir: path.resolve(env.RIN_CLAUDE_CONFIG_DIR ?? '/data/claude'),
   /** Claude runs at once across all workers; old and new workers share it during a handoff deploy. */

@@ -17,6 +17,15 @@ export function formatUsd(value: number): string {
   return `$${value.toFixed(2)}`;
 }
 
+const EFFORT_NAMES: Record<string, string> = { low: 'Low', medium: 'Medium', high: 'High', xhigh: 'XHigh', max: 'Max' };
+
+/** `claude-opus-5-5` at `xhigh` becomes `Opus 5.5 (XHigh)`. A model id of another shape is shown as it is. */
+export function modelLabel(model: string, effort: string): string {
+  const m = /^claude-([a-z]+)-(\d{1,2})(?:-(\d{1,2}))?(?:-\d{8})?$/.exec(model);
+  const name = m ? `${m[1]![0]!.toUpperCase()}${m[1]!.slice(1)} ${m[2]}${m[3] ? `.${m[3]}` : ''}` : model;
+  return `${name} (${EFFORT_NAMES[effort] ?? effort})`;
+}
+
 export function formatBytes(bytes: number): string {
   if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
   if (bytes >= 1024) return `${Math.round(bytes / 1024)}KB`;
