@@ -26,10 +26,6 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      # Start time for the "소요" (elapsed time) in the canvas line deploy.sh writes.
-      - id: start
-        run: echo "at=$(date +%s)" >> "$GITHUB_OUTPUT"
-
       - uses: actions/checkout@v7
 
       # rin-deploy trusts only this repository's main branch.
@@ -55,20 +51,10 @@ jobs:
         env:
           IMAGE: ${{ steps.image.outputs.image }}
           INSTANCE_ID: ${{ vars.RIN_INSTANCE_ID }}
-          STARTED: ${{ steps.start.outputs.at }}
         run: |
-          # Commit title, author, link and start time for the "Rin 배포" canvas line,
-          # passed as base64 JSON so no quoting can break the SSM command.
-          meta="$(jq -cn \
-            --arg title "$(git log -1 --format=%s)" \
-            --arg author "$(git log -1 --format=%an)" \
-            --arg url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/commit/$GITHUB_SHA" \
-            --argjson started "$STARTED" \
-            '{title: $title, author: $author, url: $url, started: $started}' | base64 -w0)"
-
           # Runs as root on the host. deploy.sh and compose.yaml come from the
           # image itself, so the host always runs the scripts of the version it deploys.
-          params="$(jq -cn --arg image "$IMAGE" --arg meta "$meta" '{commands: [
+          params="$(jq -cn --arg image "$IMAGE" '{commands: [
             "set -eu",
             "export HOME=/root",
             "image=\($image)",
@@ -78,7 +64,7 @@ jobs:
             "docker cp \"$cid:/app/deploy/ec2/deploy.sh\" /srv/rin/deploy.sh",
             "docker cp \"$cid:/app/deploy/compose.yaml\" /srv/rin/compose.yaml",
             "docker rm \"$cid\" >/dev/null",
-            "bash /srv/rin/deploy.sh \"$image\" \($meta)"
+            "bash /srv/rin/deploy.sh \"$image\""
           ]}')"
 
           cmd_id="$(aws ssm send-command \
