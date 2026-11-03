@@ -14,7 +14,7 @@ Rin이 외부 서비스에 접근할 때 쓰는 신원을 모두 여기에 적�
 | 서비스 | 신원 | 권한 | SSM 키 | Claude에게 | 만료 | 폐기 방법 |
 | --- | --- | --- | --- | --- | --- | --- |
 | Anthropic | API 키 | Claude 호출, 월 한도 200달러 | `ANTHROPIC_API_KEY` | 환경 변수로 준다 | 없음 | Anthropic Console에서 키 삭제 |
-| Slack | 앱 Rin(봇 토큰, Socket Mode 앱 토큰) | app_mentions:read, chat:write, reactions:write, groups:history, im:history, im:write | `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN` | 주지 않는다. Rin 도구로만 쓴다 | 없음 | api.slack.com/apps에서 앱 삭제 |
+| Slack | 앱 Rin(봇 토큰, Socket Mode 앱 토큰) | app_mentions:read, chat:write, reactions:write, groups:history, im:history, im:write, files:read, files:write | `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN` | 주지 않는다. Rin 도구로만 쓴다 | 없음 | api.slack.com/apps에서 앱 삭제 |
 | GitHub | App charlie-rin(App ID 5581776), 조직의 모든 레포에 설치 | contents, pull_requests, actions, checks, statuses, workflows 쓰기, metadata 읽기 | `GITHUB_APP_ID`, `GITHUB_APP_INSTALLATION_ID`, `GITHUB_APP_PRIVATE_KEY_B64` | 1시간짜리 설치 토큰만 `GH_TOKEN`으로 준다 | 없음(설치 토큰은 1시간) | 조직 설정에서 설치 해제, 앱 삭제 |
 | AWS | IAM 사용자 `rin-ai` | ViewOnlyAccess, 비밀값 읽기는 명시적으로 거부 | `RIN_AI_AWS_ACCESS_KEY_ID`, `RIN_AI_AWS_SECRET_ACCESS_KEY` | 환경 변수로 준다 | 없음 | `deploy/aws` Terraform에서 사용자와 키 제거 |
 | Notion | 조서현 계정의 OAuth(hosted Notion MCP) | 조서현이 볼 수 있는 페이지 전부. 삭제와 이동 도구는 막았다 | 없음. EC2 `/srv/rin/data/claude`에 있다 | Claude Code가 직접 쓴다 | 갱신이 실패하면 다시 로그인 | Notion 설정의 연결된 앱에서 해제 |

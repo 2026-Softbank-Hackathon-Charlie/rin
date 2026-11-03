@@ -1,6 +1,6 @@
 import { query, type SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { WebClient } from '@slack/web-api';
-import { aiAwsEnv, config, displayName } from '../config.js';
+import { aiAwsEnv, config, displayName, need } from '../config.js';
 import { getSetting, monthCostUsd, sql, type Job, type ScheduleRow, type ThreadRow } from '../db/index.js';
 import { botIdentity, installationToken } from '../github/app.js';
 import { asksForMerge } from '../agent/guards.js';
@@ -9,6 +9,7 @@ import { buildOptions } from '../agent/options.js';
 import { rinToolServer } from '../agent/tools.js';
 import { statusBlocks } from '../slack/blocks.js';
 import { formatDuration, formatUsd, splitMessage, tail } from '../slack/text.js';
+import { fetchAttachments, threadDir } from './attachments.js';
 import { syncRepos } from './repos.js';
 import { StatusMessage } from './status.js';
 import { requeueForResume } from './coord.js';
@@ -80,6 +81,8 @@ async function execute(p: {
   prompt: string;
   resume?: string;
   worktreeKey: string;
+  /** The Slack thread the answer goes to; files can be uploaded there. Absent for scheduled runs. */
+  thread?: { channel: string; ts: string };
   mergeAllowed: boolean;
   env: Record<string, string>;
   onSession: (sessionId: string) => Promise<void>;
@@ -96,7 +99,13 @@ async function execute(p: {
         mergeAllowed: p.mergeAllowed,
         env: p.env,
         mcpServers: {
-          rin: rinToolServer({ client: p.deps.client, botUserId: p.deps.botUserId, worktreeKey: p.worktreeKey, requester: p.job.requester }),
+          rin: rinToolServer({
+            client: p.deps.client,
+            botUserId: p.deps.botUserId,
+            worktreeKey: p.worktreeKey,
+            requester: p.job.requester,
+            thread: p.thread,
+          }),
         },
         stderr: (s) => console.error(`[job ${p.job.id}] ${s.trimEnd()}`),
       }),
@@ -143,6 +152,12 @@ async function runSlackJob(job: Job, deps: Deps): Promise<void> {
 
   const thread = (await sql<ThreadRow[]>`select * from threads where thread_ts = ${threadTs}`)[0];
   const messages = await fetchThread(client, job.channel, threadTs);
+  const filesDir = threadDir(threadTs);
+  const attachments = await fetchAttachments(
+    need('SLACK_BOT_TOKEN'),
+    filesDir,
+    messages.filter((m) => Number(m.ts) <= Number(job.trigger_ts)),
+  );
   const env = await toolEnv();
   const place = job.channel === config.channelId ? 'channel' : 'dm';
 
@@ -153,6 +168,7 @@ async function runSlackJob(job: Job, deps: Deps): Promise<void> {
       model,
       resume,
       worktreeKey: threadTs,
+      thread: { channel: job.channel, ts: threadTs },
       mergeAllowed: asksForMerge(job.prompt),
       env,
       prompt: buildPrompt({
@@ -163,6 +179,8 @@ async function runSlackJob(job: Job, deps: Deps): Promise<void> {
         hasSession: !!resume,
         place,
         resuming: job.resumed > 0,
+        attachments,
+        filesDir,
       }),
       onSession: (id) => saveThread(threadTs, job.channel, id, null),
       onLog: (lines, n) => {

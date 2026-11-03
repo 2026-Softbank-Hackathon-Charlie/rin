@@ -4,6 +4,7 @@ import { migrate, sql, type Job } from '../db/index.js';
 import { startHealthServer } from '../health.js';
 import { statusBlocks } from '../slack/blocks.js';
 import { claimNext, forgetOldWorkers, heartbeat, isLeader, jobsOfDeadWorkers, leaveWorkers, requeueForResume, workerId } from './coord.js';
+import { cleanupAttachments } from './attachments.js';
 import { cleanupWorktrees, syncRepos } from './repos.js';
 import { runJob, type RunHandle } from './run.js';
 import { dispatchDueSchedules } from './scheduler.js';
@@ -128,6 +129,7 @@ async function main(): Promise<void> {
   leaderTask('reaper', 30_000, reapDeadWorkers);
   leaderTask('repo sync', 5 * 60_000, () => syncRepos(true));
   leaderTask('worktree cleanup', 3600_000, cleanupWorktrees);
+  leaderTask('attachment cleanup', 3600_000, cleanupAttachments);
   process.on('SIGTERM', () => void shutdown('SIGTERM'));
   process.on('SIGINT', () => void shutdown('SIGINT'));
   console.log(`worker ${workerId} ready: concurrency ${config.concurrency} across workers, workspace ${config.workspaceDir}`);

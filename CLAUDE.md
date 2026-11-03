@@ -10,6 +10,7 @@ Rin이 자기 자신을 고칠 때, 그리고 팀원이 이 레포를 고칠 때
 - `src/worker/thread.ts`: 스레드 글을 프롬프트로 바꾼다. 팀원 글은 지시, 그 밖은 자료로 감싼다
 - `src/worker/coord.ts`: worker 사이의 약속(하트비트, 리더, 전체 동시 실행 상한, 끊긴 작업 재개)
 - `src/worker/repos.ts`: `repos/` clone 동기화, worktree 생성과 정리
+- `src/worker/attachments.ts`: Slack 첨부 파일 내려받기, 올릴 파일 검사, 7일 지난 파일 폴더 정리
 - `src/worker/cron.ts`, `src/worker/scheduler.ts`: 예약 시각 계산과 디스패치
 - `src/github/app.ts`: GitHub App 설치 토큰과 봇 커밋 신원
 - `src/agent/tools.ts`: Claude에게 주는 Rin 도구(`mcp__rin__*`)

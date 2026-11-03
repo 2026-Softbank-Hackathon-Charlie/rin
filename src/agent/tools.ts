@@ -1,9 +1,12 @@
+import path from 'node:path';
 import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk';
 import type { WebClient } from '@slack/web-api';
 import { z } from 'zod';
 import { apiUrl, cloudflareGet, cloudflareGraphql, graphqlRefusal } from '../cloudflare/api.js';
 import { cloudflareToken, config, displayName, resolveTeamMember, TEAM } from '../config.js';
 import { sql, type ScheduleRow } from '../db/index.js';
+import { formatBytes } from '../slack/text.js';
+import { MAX_UPLOAD_BYTES, uploadable } from '../worker/attachments.js';
 import { formatKst, planSchedule } from '../worker/cron.js';
 import { ensureWorktree } from '../worker/repos.js';
 import { clean, fetchThread, type SlackMessage } from '../worker/thread.js';
@@ -19,6 +22,8 @@ export type ToolContext = {
   /** Key that ties worktrees to the conversation: the Slack thread, or `schedule-<job id>`. */
   worktreeKey: string;
   requester: string | null;
+  /** The Slack thread of this run, where files are uploaded. Absent for scheduled runs. */
+  thread?: { channel: string; ts: string };
 };
 
 function author(m: SlackMessage, botUserId: string): string {
@@ -78,6 +83,33 @@ function cloudflareTools(token: string) {
       },
     ),
   ];
+}
+
+/** Uploads a workspace file into the thread of this run. */
+function uploadTool(client: WebClient, thread: { channel: string; ts: string }) {
+  return tool(
+    'slack_upload_file',
+    `작업 공간(${config.workspaceDir}) 안의 파일 하나를 이 대화의 스레드에 올린다. 팀원이 파일로 달라고 했거나 결과물이 파일일 때 쓴다. 팀 채널에 올린 파일은 운영진과 멘토도 본다. 최대 ${formatBytes(MAX_UPLOAD_BYTES)}.`,
+    {
+      path: z.string().min(1).describe('올릴 파일의 절대 경로'),
+      title: z.string().max(200).optional(),
+      comment: z.string().max(3000).optional().describe('파일과 함께 올라갈 짧은 설명, Slack mrkdwn'),
+    },
+    async ({ path: file, title, comment }) => {
+      const checked = uploadable(file, config.workspaceDir);
+      if (typeof checked === 'string') return text(`올리지 않았다: ${checked}`);
+      const filename = path.basename(checked.path);
+      await client.filesUploadV2({
+        channel_id: thread.channel,
+        thread_ts: thread.ts,
+        file: checked.path,
+        filename,
+        title: title ?? filename,
+        initial_comment: comment,
+      });
+      return text(`올렸다: ${filename}`);
+    },
+  );
 }
 
 /** Rin's own tools, exposed to Claude as mcp__rin__<name>. Built per job so they know who asked. */
@@ -215,6 +247,7 @@ export function rinToolServer(ctx: ToolContext) {
         const rows = await sql`delete from schedules where id = ${id} returning id`;
         return text(rows.length ? `예약 #${id}을 지웠다.` : `예약 #${id}이 없다.`);
       }),
+      ...(ctx.thread ? [uploadTool(client, ctx.thread)] : []),
       ...(cfToken ? cloudflareTools(cfToken) : []),
     ],
   });
