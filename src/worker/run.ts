@@ -11,7 +11,6 @@ import { rinToolServer } from '../agent/tools.js';
 import { statusBlocks } from '../slack/blocks.js';
 import { formatDuration, formatUsd, splitMessage, tail } from '../slack/text.js';
 import { fetchAttachments, threadDir } from './attachments.js';
-import { syncRepos } from './repos.js';
 import { StatusMessage } from './status.js';
 import { requeueForResume } from './coord.js';
 import { runCost } from './cost.js';
@@ -65,7 +64,6 @@ async function toolEnv(): Promise<Record<string, string>> {
         env.GIT_AUTHOR_NAME = env.GIT_COMMITTER_NAME = id.name;
         env.GIT_AUTHOR_EMAIL = env.GIT_COMMITTER_EMAIL = id.email;
       }
-      await syncRepos();
     }
   } catch (err) {
     console.error('GitHub setup failed; running without it', err instanceof Error ? err.message : err);
@@ -82,7 +80,6 @@ async function execute(p: {
   model: string;
   prompt: string;
   resume?: string;
-  worktreeKey: string;
   /** The Slack thread the answer goes to; files can be uploaded there. Absent for scheduled runs. */
   thread?: { channel: string; ts: string };
   mergeAllowed: boolean;
@@ -105,7 +102,6 @@ async function execute(p: {
           rin: rinToolServer({
             client: p.deps.client,
             botUserId: p.deps.botUserId,
-            worktreeKey: p.worktreeKey,
             requester: p.job.requester,
             thread: p.thread,
           }),
@@ -171,7 +167,6 @@ async function runSlackJob(job: Job, deps: Deps): Promise<void> {
       job,
       model,
       resume,
-      worktreeKey: threadTs,
       thread: { channel: job.channel, ts: threadTs },
       mergeAllowed: asksForMerge(job.prompt),
       env,
@@ -258,7 +253,6 @@ async function runScheduleJob(job: Job, deps: Deps): Promise<void> {
     deps,
     job,
     model,
-    worktreeKey: `schedule-${job.id}`,
     mergeAllowed: false,
     env,
     prompt: buildSchedulePrompt({ id: job.schedule_id ?? 0, title, prompt: job.prompt, createdBy: job.requester ?? '' }),

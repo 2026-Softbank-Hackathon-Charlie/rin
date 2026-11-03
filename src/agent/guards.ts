@@ -60,14 +60,14 @@ export function checkBash(command: string, ctx: { mergeAllowed: boolean }): Verd
   return ALLOW;
 }
 
-/** Policy for file-writing tools: the clones under repos/ are read-only. */
+/** Policy for file-writing tools: the shared clones under repos/ are not edited in place; changes go in a worktree. */
 export function checkWritePath(filePath: string | undefined, workspaceDir: string): Verdict {
   if (!filePath) return ALLOW;
   const reposDir = path.resolve(workspaceDir, 'repos');
   const target = path.resolve(workspaceDir, filePath);
   const rel = path.relative(reposDir, target);
   if (rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel))) {
-    return deny('repos/ 아래 clone은 읽기용이다. 고치려면 worktree를 만들고 그 안에서 고친다.');
+    return deny('repos/ 아래 clone은 모든 실행이 같이 쓰는 기준 clone이라 직접 고치지 않는다. worktrees/ 아래에 worktree를 만들고 그 안에서 고친다.');
   }
   return ALLOW;
 }

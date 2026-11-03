@@ -37,16 +37,6 @@ export type ThreadRow = {
   updated_at: Date;
 };
 
-export type WorktreeRow = {
-  id: number;
-  thread_ts: string;
-  repo: string;
-  path: string;
-  branch: string;
-  created_at: Date;
-  last_used_at: Date;
-};
-
 export type ScheduleRow = {
   id: number;
   title: string;

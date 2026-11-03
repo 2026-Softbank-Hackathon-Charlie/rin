@@ -14,7 +14,7 @@
 | 프로세스 | 하는 일 |
 | --- | --- |
 | gateway (`src/gateway`) | Slack Socket Mode로 채널 멘션, DM, 버튼 클릭을 받는다. 팀원 5명만 받고, 요청을 작업 큐에 넣는다. |
-| worker (`src/worker`) | 큐에서 작업을 꺼내 Claude Agent SDK로 실행한다. Claude Code는 실행마다 띄우는 샌드박스 컨테이너에서 돈다(`DEPLOY.md`). 동시 실행은 최대 4개다. 상태 메시지에 로그 꼬리와 취소 버튼을 보여 주고, 결과를 스레드에 올린다. 예약 작업을 30초마다 큐에 넣고, 조직 레포를 `repos/`에 최신으로 맞춘다. |
+| worker (`src/worker`) | 큐에서 작업을 꺼내 Claude Agent SDK로 실행한다. Claude Code는 실행마다 띄우는 샌드박스 컨테이너에서 돈다(`DEPLOY.md`). 동시 실행은 최대 4개다. 상태 메시지에 로그 꼬리와 취소 버튼을 보여 주고, 결과를 스레드에 올린다. 예약 작업을 30초마다 큐에 넣는다. 조직 레포의 clone(`repos/`)과 worktree는 Claude가 샌드박스에서 직접 다룬다. |
 
 두 프로세스는 Postgres(`jobs`, `threads`, `worktrees`, `schedules`, `settings`)로만 이어진다. 모든 실행은 같은 작업 공간(`RIN_WORKSPACE`)을 cwd로 써서 CLAUDE.md, 스킬, 메모리를 공유한다.
 
@@ -24,7 +24,6 @@ Claude가 쓰는 Rin 도구(`mcp__rin__*`)는 `src/agent/tools.ts`에 있다.
 | --- | --- |
 | `slack_read_thread`, `slack_list_messages`, `slack_search_messages` | 팀 채널의 이전 대화를 읽고 찾는다. 결과는 자료로 감싼다. |
 | `slack_send_dm` | 팀원에게 DM을 보낸다. 팀원 밖에는 보내지 않는다. |
-| `worktree_create` | 코드 수정용 worktree를 `rin/<id>` 브랜치로 만든다. 스레드마다 같은 worktree를 이어 쓴다. |
 | `schedule_create`, `schedule_list`, `schedule_update`, `schedule_delete` | 예약 작업을 관리한다. cron(KST) 또는 한 번만 실행할 ISO 시각을 쓴다. |
 
 ## Slack 앱 설정

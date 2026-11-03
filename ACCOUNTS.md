@@ -30,5 +30,5 @@ Rin이 외부 서비스에 접근할 때 쓰는 신원을 모두 여기에 적�
 Claude Code는 실행마다 worker가 띄우는 샌드박스 컨테이너에서 돈다(`src/worker/sandbox.ts`). 샌드박스가 받는 것은 위 표에서 "환경 변수로 준다"로 적은 값(Anthropic API 키, GitHub 설치 토큰, `rin-ai` 키, `rin_reader` 로그인)과 `/data`(작업 공간, Claude Code 설정과 Notion 로그인, `/data/tools`)뿐이다. "주지 않는다"로 적은 Slack 토큰, GitHub App 개인 키, Cloudflare 토큰과 `POSTGRES_PASSWORD`는 worker 컨테이너에만 있다.
 
 - 샌드박스 안에서 Claude는 sudo를 쓸 수 있다. 샌드박스에는 Docker 소켓이 없고, EC2 메타데이터 응답의 hop 제한이 1이라서 인스턴스 역할도 쓸 수 없다.
-- worker는 샌드박스를 띄우기 위해 호스트의 Docker 소켓을 가진다. 그래서 worker 안에서 코드가 실행되면 호스트 root를 얻은 것과 같다. worker는 Claude가 쓴 파일을 실행하지 않는다. worker가 git을 실행하는 `repos/`는 샌드박스에 읽기 전용으로 마운트하고, worktree는 독립 clone으로 만든 뒤 그 안에서는 git을 실행하지 않는다.
+- worker는 샌드박스를 띄우기 위해 호스트의 Docker 소켓을 가진다. 그래서 worker 안에서 코드가 실행되면 호스트 root를 얻은 것과 같다. worker는 Claude가 쓴 파일을 실행하지 않는다. `/data` 아래(`repos/`, `worktrees/` 포함)는 모든 샌드박스가 쓸 수 있으므로, worker는 그 안에서 git을 포함한 어떤 명령도 실행하지 않는다. git hook이나 설정을 심어도 샌드박스 안에서만 돈다.
 - 남은 한계: Anthropic API 키와 `/data/claude`의 Notion OAuth 토큰은 Claude가 읽을 수 있다. 로컬 개발(`compose.dev.yaml`)에는 샌드박스가 없어서 Claude가 worker 컨테이너 안에서 돈다.

@@ -22,7 +22,8 @@
 
 - 지금 작업 디렉터리는 모든 실행이 함께 쓰는 작업 공간이다. 이 디렉터리의 `CLAUDE.md`, `.claude/skills/`, 메모리는 다음 실행에도 남는다.
 - 팀원이 기억해 달라고 한 것, 팀원과 일하면서 알게 된 반복 작업 방법은 메모리나 스킬로 남긴다.
-- `repos/` 아래에는 조직 레포가 최신 기본 브랜치로 clone 되어 있다. 코드를 읽을 때는 여기를 본다. 이 clone은 읽기 전용으로 마운트되어 있어서 고칠 수 없다.
+- `repos/<레포>`는 조직 레포의 clone이다. 모든 실행이 같은 clone을 같이 쓰고, Rin이 따로 최신으로 맞춰 주지 않는다. 코드를 읽기 전에 `git -C repos/<레포> pull --ff-only`로 기본 브랜치를 최신으로 맞춘다. 없는 레포는 `git clone https://github.com/2026-Softbank-Hackathon-Charlie/<레포>.git repos/<레포>`로 받는다.
+- `repos/<레포>`의 작업 트리는 기본 브랜치에 두고 직접 고치지 않는다. 다른 실행이 같은 파일을 읽는다.
 
 ## 실행 환경
 
@@ -34,11 +35,14 @@
 
 ## 코드 수정과 PR
 
-1. `mcp__rin__worktree_create`로 레포의 worktree를 받는다. 같은 대화에서 다시 부르면 같은 worktree와 브랜치가 나온다.
-2. 그 경로 안에서 고치고, 레포의 `CLAUDE.md`가 정한 검사를 돌린 뒤 커밋한다. 검사에 필요한 툴체인이 없으면 mise로 설치해서 돌린다. 검사를 돌리지 못했으면 PR 본문에 그 사실과 이유를 적는다.
+1. 코드를 고칠 때는 항상 git worktree를 만들어 그 안에서 고친다. `git -C repos/<레포> fetch origin`을 한 뒤 `git -C repos/<레포> worktree add "$PWD/worktrees/<레포>-<주제>" -b rin/<주제> origin/<기본 브랜치>`로 만든다. `<주제>`는 영문 소문자와 하이픈으로 짧게 쓴다.
+   - 이어서 하는 작업이면 새로 만들지 않는다. `git -C repos/<레포> worktree list`와 `git -C repos/<레포> branch --list 'rin/*'`로 기존 worktree와 브랜치를 찾아 그 안에서 계속한다. 다른 대화에서 만든 worktree도 같은 방법으로 찾아 이어 갈 수 있다.
+   - 다른 실행이 지금 쓰고 있을 수 있으니, 요청과 관계없는 worktree는 건드리지 않는다.
+2. 그 worktree 안에서 고치고, 레포의 `CLAUDE.md`가 정한 검사를 돌린 뒤 커밋한다. 검사에 필요한 툴체인이 없으면 mise로 설치해서 돌린다. 검사를 돌리지 못했으면 PR 본문에 그 사실과 이유를 적는다.
 3. `git push origin <브랜치>`로 올리고 `gh pr create`로 PR을 연다. PR 제목과 본문은 한국어로 쓰고, 본문에 바꾼 것과 확인한 것을 적는다. 이 조직의 레포는 squash 머지만 쓴다.
 4. 머지는 요청자가 이번 요청에서 머지를 명시적으로 말했을 때만 `gh pr merge --squash`로 한다.
 5. Rin 자신의 레포(`rin`)를 고칠 때는 그 레포의 `CLAUDE.md`와 `DEPLOY.md`를 먼저 읽는다. main에 머지되면 자동으로 배포된다.
+6. PR이 머지되거나 닫힌 worktree는 `git -C repos/<레포> worktree remove <경로>`로 지우고, 그 브랜치도 `git -C repos/<레포> branch -D <브랜치>`로 지운다.
 
 ## GitHub
 

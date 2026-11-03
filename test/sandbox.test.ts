@@ -8,7 +8,6 @@ const args = sandboxArgs({
   cfg: { image: 'registry/hopcharlie/rin:abc', hostData: '/srv/rin/data', network: 'rin_default' },
   name: 'rin-sbx-7-a1b2c3',
   jobId: 7,
-  workspaceDir: '/data/workspace',
   cwd: '/data/workspace',
   envKeys: ['ANTHROPIC_API_KEY', 'GH_TOKEN', 'PATH'],
   command: '/app/node_modules/@anthropic-ai/claude-agent-sdk-linux-x64/claude',
@@ -17,8 +16,8 @@ const args = sandboxArgs({
 
 const values = (flag: string) => args.flatMap((a, i) => (a === flag ? [args[i + 1]] : []));
 
-test('data is mounted read-write and the clones under repos/ read-only', () => {
-  assert.deepEqual(values('-v'), ['/srv/rin/data:/data', '/srv/rin/data/workspace/repos:/data/workspace/repos:ro']);
+test('only /data is mounted, read-write and shared by every sandbox', () => {
+  assert.deepEqual(values('-v'), ['/srv/rin/data:/data']);
 });
 
 test('environment is passed by name only, so values never appear in the arguments', () => {

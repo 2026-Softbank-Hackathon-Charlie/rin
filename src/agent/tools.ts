@@ -8,7 +8,6 @@ import { sql, type ScheduleRow } from '../db/index.js';
 import { formatBytes } from '../slack/text.js';
 import { MAX_UPLOAD_BYTES, uploadable } from '../worker/attachments.js';
 import { formatKst, planSchedule } from '../worker/cron.js';
-import { ensureWorktree } from '../worker/repos.js';
 import { clean, fetchThread, type SlackMessage } from '../worker/thread.js';
 
 const MAX_ACTIVE_SCHEDULES = 20;
@@ -19,8 +18,6 @@ const data = (title: string, body: string) => text(`<<<자료 시작: ${title}>>
 export type ToolContext = {
   client: WebClient;
   botUserId: string;
-  /** Key that ties worktrees to the conversation: the Slack thread, or `schedule-<job id>`. */
-  worktreeKey: string;
   requester: string | null;
   /** The Slack thread of this run, where files are uploaded. Absent for scheduled runs. */
   thread?: { channel: string; ts: string };
@@ -169,25 +166,6 @@ export function rinToolServer(ctx: ToolContext) {
           const note = ctx.requester ? `\n\n_${displayName(ctx.requester)}님의 요청으로 Rin이 보냈습니다_` : '';
           await client.chat.postMessage({ channel, text: body + note });
           return text(`${displayName(user)}님에게 DM을 보냈다.`);
-        },
-      ),
-      tool(
-        'worktree_create',
-        '코드를 고치기 위한 git worktree를 만든다. 이 대화에서 같은 레포로 이미 만든 worktree가 있으면 그것을 돌려준다. repo는 조직 레포 이름이다(예: platform, rin). 돌려받은 경로 안에서만 파일을 고친다.',
-        { repo: z.string() },
-        async ({ repo }) => {
-          try {
-            const wt = await ensureWorktree(ctx.worktreeKey, repo.trim());
-            return text(
-              [
-                `${wt.created ? '새 worktree를 만들었다' : '이 대화의 기존 worktree다'}: ${wt.path}`,
-                `브랜치: ${wt.branch} (기준: origin/${wt.base})`,
-                `이 경로에서 고치고 커밋한 뒤 \`git push origin ${wt.branch}\`, 이어서 \`gh pr create --base ${wt.base} --head ${wt.branch}\`로 PR을 연다.`,
-              ].join('\n'),
-            );
-          } catch (err) {
-            return text(`worktree를 만들지 못했다: ${err instanceof Error ? err.message : String(err)}`);
-          }
         },
       ),
       tool(
