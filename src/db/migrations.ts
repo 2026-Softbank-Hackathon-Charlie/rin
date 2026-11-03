@@ -90,4 +90,11 @@ export const migrations: { id: number; sql: string }[] = [
       alter table jobs add column resumed int not null default 0;
     `,
   },
+  {
+    id: 4,
+    sql: `
+      -- The SDK reports a resumed session's cost from its start; keep the last total to report each run's own cost.
+      alter table threads add column session_cost_usd numeric(10, 4);
+    `,
+  },
 ];
