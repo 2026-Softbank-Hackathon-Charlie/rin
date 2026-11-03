@@ -37,15 +37,22 @@ jobs:
       - id: ecr
         uses: aws-actions/amazon-ecr-login@v2
 
+      - id: image
+        run: echo "image=${{ steps.ecr.outputs.registry }}/hopcharlie/rin:$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+
+      # Layers come from the GitHub Actions cache when their inputs did not change, so they keep
+      # their digests: ECR skips the upload and the host skips the download of the large Chromium layer.
+      - uses: docker/setup-buildx-action@v4
+
       - name: Build and push
-        id: image
-        env:
-          REGISTRY: ${{ steps.ecr.outputs.registry }}
-        run: |
-          image="$REGISTRY/hopcharlie/rin:$GITHUB_SHA"
-          docker build -t "$image" .
-          docker push "$image"
-          echo "image=$image" >> "$GITHUB_OUTPUT"
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.image.outputs.image }}
+          provenance: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
       - name: Deploy on EC2
         env:

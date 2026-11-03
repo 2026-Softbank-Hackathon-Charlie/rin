@@ -17,6 +17,7 @@ Rin이 자기 자신을 고칠 때, 그리고 팀원이 이 레포를 고칠 때
 - `src/agent/guards.ts`: Bash와 파일 쓰기 정책. `src/agent/options.ts`가 PreToolUse 훅으로 건다
 - `src/cloudflare/api.ts`: Cloudflare 읽기 전용 API 호출. 토큰은 Claude에게 넘기지 않는다
 - `src/slack/`: 메시지 나누기, 상태 메시지 블록
+- `bin/mmd2png.mjs`: Mermaid 파일을 이미지의 Chromium과 `mermaid.min.js`로 PNG로 바꾼다. 이미지 안에서는 `mmd2png` 명령이다
 - `src/db/`: Postgres 접근과 마이그레이션
 - `prompts/`: 시스템 프롬프트에 붙는 글. 붙는 순서는 `src/agent/options.ts`의 `PROMPT_FILES`다. `rin.md`는 팀 규칙, `hackathon.md`는 해커톤 문맥, `korean.md`는 한국어 글쓰기와 문자 규칙, `karpathy.md`는 코드 작업 지침이다
 - `workspace-template/`: 작업 공간을 처음 만들 때 복사하는 파일. `skills/` 아래 스킬은 worker가 시작할 때마다 작업 공간의 `.claude/skills/`에 덮어쓴다

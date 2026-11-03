@@ -5,7 +5,7 @@ description: 다이어그램, 차트, 표, 한 장짜리 요약 같은 이미지
 
 # 시각화 이미지 만들기
 
-이 컨테이너에는 Chromium(`chromium`), mermaid-cli(`mmdc`), 한글 글꼴(Noto Sans CJK KR)이 있다. 원본 파일과 PNG는 이 대화의 파일 폴더에 만든다. 이 폴더의 경로는 프롬프트의 상황 줄에 적혀 있다. 확인을 마친 PNG만 `mcp__rin__slack_upload_file`로 올린다.
+이 컨테이너에는 Chromium(`chromium`), Mermaid를 PNG로 바꾸는 `mmd2png`, 한글 글꼴(Noto Sans CJK KR)이 있다. 원본 파일과 PNG는 이 대화의 파일 폴더에 만든다. 이 폴더의 경로는 프롬프트의 상황 줄에 적혀 있다. 확인을 마친 PNG만 `mcp__rin__slack_upload_file`로 올린다.
 
 ## 도구 고르기
 
@@ -15,12 +15,13 @@ description: 다이어그램, 차트, 표, 한 장짜리 요약 같은 이미지
 ## Mermaid
 
 ```sh
-mmdc -i diagram.mmd -o diagram.png -s 2 -b white
+mmd2png diagram.mmd diagram.png
 ```
 
-- `-s 2`는 2배 해상도다. 배경은 흰색으로 둔다.
+- 2배 해상도의 흰 배경 PNG가 나온다. 배율은 `--scale 3`처럼 바꾼다.
 - 한글이나 공백이 든 라벨은 큰따옴표로 감싼다. 예를 들어 `A["결제 서비스"]`처럼 쓴다.
-- 문법 오류가 나면 오류 메시지의 줄 번호를 보고 고친다.
+- 테마는 다이어그램 첫 줄에 `%%{init: {"theme": "neutral"}}%%`처럼 적는다.
+- 문법 오류가 나면 Mermaid의 오류 메시지가 출력되고 종료 코드 1로 끝난다. 메시지의 줄 번호를 보고 고친다.
 - 같은 그림을 Notion에 넣을 때는 PNG 대신 Mermaid 코드를 언어가 mermaid인 코드 블록으로 넣는다. Notion이 직접 그린다.
 
 ## HTML
