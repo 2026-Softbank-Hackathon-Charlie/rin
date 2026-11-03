@@ -1,7 +1,7 @@
 import { query, type SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { WebClient } from '@slack/web-api';
 import { aiAwsEnv, config, displayName, need } from '../config.js';
-import { getSetting, monthCostUsd, sql, type Job, type ScheduleRow, type ThreadRow } from '../db/index.js';
+import { getSetting, sql, type Job, type ScheduleRow, type ThreadRow } from '../db/index.js';
 import { botIdentity, installationToken } from '../github/app.js';
 import { asksForMerge } from '../agent/guards.js';
 import { logLines } from '../agent/logfmt.js';
@@ -227,7 +227,7 @@ async function runSlackJob(job: Job, deps: Deps): Promise<void> {
 
   if (exec.result?.subtype === 'success') {
     await sql`update jobs set status = 'done', cost_usd = coalesce(cost_usd, 0) + ${cost ?? 0}, finished_at = now() where id = ${job.id}`;
-    const footer = `_소요 ${elapsed} | 이번 ${formatUsd(cost ?? 0)} | 이번 달 ${formatUsd(await monthCostUsd())} | ${model}_`;
+    const footer = `_소요 ${elapsed} | 이번 ${formatUsd(cost ?? 0)} | ${model}_`;
     const [head, ...rest] = splitMessage(`${exec.result.result.trim() || '(답이 비어 있다)'}\n\n${footer}`);
     if (status) await status.close({ text: head ?? footer, blocks: [] });
     else await client.chat.postMessage({ channel: job.channel, thread_ts: threadTs, text: head ?? footer });
