@@ -41,7 +41,7 @@ features:
     always_online: true
 oauth_config:
   scopes:
-    bot: [app_mentions:read, chat:write, reactions:write, groups:history, im:history, im:write]
+    bot: [app_mentions:read, chat:write, reactions:write, groups:history, im:history, im:write, canvases:read, canvases:write]
 settings:
   event_subscriptions:
     bot_events: [app_mention, message.im]

@@ -15,7 +15,8 @@
   2. 이미지를 빌드해 ECR `hopcharlie/rin:<커밋 sha>`에 올린다.
   3. SSM Run Command로 EC2에서 새 이미지의 `deploy/ec2/deploy.sh`와 `deploy/compose.yaml`을 꺼내 `/srv/rin`에 두고 `deploy.sh`를 실행한다.
 - `deploy.sh`는 SSM `/rin/*`의 비밀값을 `/run/rin.env`에 쓰고, `docker compose`로 gateway와 worker를 새 이미지로 바꾼다. postgres는 그대로 둔다.
-- 두 컨테이너가 180초 안에 healthy가 되지 않으면 직전 이미지로 되돌리고 Actions 실행을 실패로 끝낸다. 결과는 팀 채널에 한 줄로 알린다.
+- 두 컨테이너가 180초 안에 healthy가 되지 않으면 직전 이미지로 되돌리고 Actions 실행을 실패로 끝낸다.
+- 결과는 팀 채널이 아니라 Slack 캔버스 "Rin 배포"(F0CE56L6V29)의 제목 바로 아래에 한 줄로 남긴다. 그래서 최신 배포가 맨 위에 온다. 형식은 `[커밋 제목](커밋 링크) 배포 완료 - 작성자: 이름, 소요: N분 N초`이고, 소요는 워크플로 시작부터 배포 완료까지다. 봇에 `canvases:read`, `canvases:write` 권한과 캔버스 편집 권한이 있어야 한다.
 - worker는 종료 신호를 받으면 실행 중인 작업을 최대 4분 동안 마무리한다.
 - 인프라(EC2, ECR, IAM 역할, `rin-ai` 사용자)는 `deploy/aws/`의 Terraform으로 관리한다. state는 `hopcharlie-tfstate-525091405886-apne2` 버킷의 `rin/terraform.tfstate`에 있다.
 
