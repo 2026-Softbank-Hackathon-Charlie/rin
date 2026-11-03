@@ -25,12 +25,29 @@ export function formatBytes(bytes: number): string {
 
 const FENCE = /^\s*```(.*)$/;
 
+const bytes = (s: string) => Buffer.byteLength(s, 'utf8');
+
+/** The longest prefix of `s` within `max` UTF-8 bytes, never splitting a character, and at least one character. */
+function prefixWithin(s: string, max: number): string {
+  let used = 0;
+  let end = 0;
+  for (const ch of s) {
+    const b = bytes(ch);
+    if (used + b > max && end > 0) break;
+    used += b;
+    end += ch.length;
+  }
+  return s.slice(0, end);
+}
+
 /**
- * Splits text into chunks of at most `limit` characters, preferring line breaks.
+ * Splits text into chunks of at most `limit` UTF-8 bytes, preferring line breaks.
+ * Slack's chat.update rejects text over 4,000 bytes (msg_too_long), and a Korean
+ * character takes three, so the limit is in bytes, not characters.
  * A code block cut by a split is closed at the end of one chunk and reopened
  * (with the same language tag) at the start of the next.
  */
-export function splitMessage(text: string, limit = 3500): string[] {
+export function splitMessage(text: string, limit = 3900): string[] {
   const out: string[] = [];
   let fence: string | null = null; // language tag of the open code block, '' when untagged
   const opening = () => (fence !== null ? '```' + fence : '');
@@ -46,8 +63,8 @@ export function splitMessage(text: string, limit = 3500): string[] {
     let line = original;
     for (;;) {
       const sep = cur === '' ? '' : '\n';
-      const room = limit - cur.length - sep.length - closing().length;
-      if (line.length <= room) {
+      const room = limit - bytes(cur) - bytes(sep) - bytes(closing());
+      if (bytes(line) <= room) {
         cur += sep + line;
         break;
       }
@@ -56,9 +73,9 @@ export function splitMessage(text: string, limit = 3500): string[] {
         continue;
       }
       // The line alone does not fit an empty chunk: cut it hard.
-      const take = Math.max(1, room);
-      cur += sep + line.slice(0, take);
-      line = line.slice(take);
+      const take = prefixWithin(line, room);
+      cur += sep + take;
+      line = line.slice(take.length);
       flush();
     }
     const m = FENCE.exec(original);
