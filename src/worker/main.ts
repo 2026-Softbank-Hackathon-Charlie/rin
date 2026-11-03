@@ -8,6 +8,7 @@ import { claimNext, forgetOldWorkers, heartbeat, isLeader, jobsOfDeadWorkers, le
 import { cleanupAttachments } from './attachments.js';
 import { cleanupWorktrees, syncRepos } from './repos.js';
 import { runJob, type RunHandle } from './run.js';
+import { checkSandbox, sweepSandboxes } from './sandbox.js';
 import { dispatchDueSchedules } from './scheduler.js';
 import { ensureWorkspace } from './workspace.js';
 
@@ -122,6 +123,7 @@ async function main(): Promise<void> {
   await migrate();
   await ensureReader().catch((err) => console.error('could not set the read-only DB role password; psql will not work', errText(err)));
   ensureWorkspace();
+  await checkSandbox();
   botUserId = (await client.auth.test()).user_id ?? '';
   await heartbeat(false);
   lastHeartbeat = Date.now();
@@ -132,9 +134,11 @@ async function main(): Promise<void> {
   leaderTask('repo sync', 5 * 60_000, () => syncRepos(true));
   leaderTask('worktree cleanup', 3600_000, cleanupWorktrees);
   leaderTask('attachment cleanup', 3600_000, cleanupAttachments);
+  leaderTask('sandbox sweep', 10 * 60_000, sweepSandboxes);
   process.on('SIGTERM', () => void shutdown('SIGTERM'));
   process.on('SIGINT', () => void shutdown('SIGINT'));
-  console.log(`worker ${workerId} ready: concurrency ${config.concurrency} across workers, workspace ${config.workspaceDir}`);
+  const where = config.sandbox ? `a sandbox container per run (${config.sandbox.image})` : 'the worker container';
+  console.log(`worker ${workerId} ready: concurrency ${config.concurrency} across workers, workspace ${config.workspaceDir}, Claude runs in ${where}`);
 }
 
 main().catch((err) => {

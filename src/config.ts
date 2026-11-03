@@ -30,6 +30,16 @@ export const TEAM: Record<string, string> = {
   U0C4QG4TRAS: '이태훈',
 };
 
+/** Where Claude runs when it runs in a container per run (src/worker/sandbox.ts). */
+export type SandboxConfig = {
+  /** The image of the sandbox: the same image as the worker. */
+  image: string;
+  /** Host path of the worker's /data, mounted at /data in the sandbox. */
+  hostData: string;
+  /** Docker network with Postgres, for psql. */
+  network: string;
+};
+
 const allowed = (env.RIN_ALLOWED_USERS ?? Object.keys(TEAM).join(','))
   .split(',')
   .map((s) => s.trim())
@@ -50,6 +60,10 @@ export const config = {
   drainMs: int('RIN_DRAIN_MS', 2 * 3600_000),
   /** Short commit of the running image; set by deploy.sh. */
   version: env.RIN_VERSION ?? 'dev',
+  /** Set on the EC2 host (deploy/compose.app.yaml). Unset, Claude runs inside the worker as in local development. */
+  sandbox: env.RIN_SANDBOX_IMAGE
+    ? ({ image: env.RIN_SANDBOX_IMAGE, hostData: need('RIN_SANDBOX_HOST_DATA'), network: env.RIN_SANDBOX_NETWORK ?? 'rin_default' } satisfies SandboxConfig)
+    : undefined,
 };
 
 export const GITHUB_ORG = env.RIN_GITHUB_ORG ?? '2026-Softbank-Hackathon-Charlie';

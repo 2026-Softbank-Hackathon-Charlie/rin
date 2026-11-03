@@ -14,7 +14,7 @@
 | 프로세스 | 하는 일 |
 | --- | --- |
 | gateway (`src/gateway`) | Slack Socket Mode로 채널 멘션, DM, 버튼 클릭을 받는다. 팀원 5명만 받고, 요청을 작업 큐에 넣는다. |
-| worker (`src/worker`) | 큐에서 작업을 꺼내 Claude Agent SDK로 실행한다. 동시 실행은 최대 4개다. 상태 메시지에 로그 꼬리와 취소 버튼을 보여 주고, 결과를 스레드에 올린다. 예약 작업을 30초마다 큐에 넣고, 조직 레포를 `repos/`에 최신으로 맞춘다. |
+| worker (`src/worker`) | 큐에서 작업을 꺼내 Claude Agent SDK로 실행한다. Claude Code는 실행마다 띄우는 샌드박스 컨테이너에서 돈다(`DEPLOY.md`). 동시 실행은 최대 4개다. 상태 메시지에 로그 꼬리와 취소 버튼을 보여 주고, 결과를 스레드에 올린다. 예약 작업을 30초마다 큐에 넣고, 조직 레포를 `repos/`에 최신으로 맞춘다. |
 
 두 프로세스는 Postgres(`jobs`, `threads`, `worktrees`, `schedules`, `settings`)로만 이어진다. 모든 실행은 같은 작업 공간(`RIN_WORKSPACE`)을 cwd로 써서 CLAUDE.md, 스킬, 메모리를 공유한다.
 

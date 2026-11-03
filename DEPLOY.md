@@ -23,6 +23,13 @@ main에 머지하면 `.github/workflows/deploy.yml`이 동작한다.
 4. healthy가 되면 옛 gateway를 지운다. Socket Mode는 연결 여러 개를 허용하고 이벤트 하나를 그중 한 곳에만 보내므로, 겹치는 동안 멘션이 유실되지 않는다.
 5. 옛 worker에는 SIGTERM을 보내고 재시작하지 않게 한다. 옛 worker는 새 작업을 받지 않고, 하던 작업을 최대 2시간까지 마친 뒤 스스로 종료한다.
 
+## 샌드박스
+
+- worker는 Claude Code를 직접 띄우지 않고, 실행마다 같은 이미지로 샌드박스 컨테이너 `rin-sbx-<작업 id>-<임의 값>`을 띄운다. 샌드박스는 `rin_default` 네트워크에 붙고, `/srv/rin/data`를 `/data`로, `repos/`를 읽기 전용으로 마운트한다. 메모리는 3GB까지다.
+- worker는 이를 위해 `/var/run/docker.sock`을 마운트하고, 소켓을 가진 그룹에 들어간다. 그룹 id는 `deploy.sh`가 `DOCKER_GID`로 넘긴다. worker가 시작할 때 Docker나 이미지를 쓸 수 없으면 healthy가 되지 않으므로, 배포는 옛 버전을 남긴 채 실패한다.
+- 샌드박스는 Claude가 끝나면 `--rm`으로 지워진다. 남은 샌드박스는 리더가 10분마다 찾아서, 작업이 더 이상 실행 중이 아니면 지운다.
+- 로컬 개발(`compose.dev.yaml`)에는 샌드박스가 없다. `RIN_SANDBOX_IMAGE`가 없으면 Claude는 worker 컨테이너 안에서 돈다.
+
 ## worker 사이의 약속
 
 - 동시 실행 상한(4개)은 프로세스가 아니라 DB에서 실행 중인 작업 전체를 센다. 옛 worker와 새 worker가 겹쳐도 Claude 실행은 4개를 넘지 않는다.

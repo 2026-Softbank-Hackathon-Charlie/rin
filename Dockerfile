@@ -9,12 +9,18 @@ RUN npm run build && npm prune --omit=dev
 FROM node:22-bookworm-slim
 # git, gh, the AWS CLI and psql are tools Claude uses from Bash. The AWS CLI runs with the view-only rin-ai keys;
 # psql logs in as the read-only role rin_reader (src/db/reader.ts).
+# The worker uses the Docker CLI to start a sandbox container per run from this same image (src/worker/sandbox.ts).
+# In the sandbox Claude may use sudo to install packages; the worker and the gateway run with no-new-privileges,
+# so sudo does nothing there.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends git ca-certificates curl gnupg ripgrep unzip awscli postgresql-client \
+ && apt-get install -y --no-install-recommends git ca-certificates curl gnupg ripgrep unzip awscli postgresql-client sudo \
  && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o /usr/share/keyrings/githubcli-archive-keyring.gpg \
  && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list \
- && apt-get update && apt-get install -y --no-install-recommends gh \
+ && curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /usr/share/keyrings/docker.gpg \
+ && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker.gpg] https://download.docker.com/linux/debian bookworm stable" > /etc/apt/sources.list.d/docker.list \
+ && apt-get update && apt-get install -y --no-install-recommends gh docker-ce-cli \
  && rm -rf /var/lib/apt/lists/* \
+ && echo 'node ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/node && chmod 440 /etc/sudoers.d/node \
  && mkdir -p /data && chown node:node /data \
  # git over HTTPS authenticates with the installation token in $GH_TOKEN; the token never lands in .git/config.
  && git config --system credential.https://github.com.helper '!f() { echo username=x-access-token; echo "password=$GH_TOKEN"; }; f'
@@ -28,6 +34,19 @@ RUN apt-get update \
  && PUPPETEER_SKIP_DOWNLOAD=true npm install -g @mermaid-js/mermaid-cli@12.0.0 puppeteer@25.14.0 \
  && npm cache clean --force
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+# mise installs toolchains (Go, Python, Java, kubectl, ...) without root. They and the Go, npm and pip caches live
+# under /data/tools, which is on the host, so what Claude installs once stays across runs and deploys.
+RUN curl -fsSL -o /usr/local/bin/mise https://github.com/jdx/mise/releases/download/v2026.10.25/mise-v2026.10.25-linux-x64 \
+ && echo "5d362ecc578dc7c146679b841dda949d6472cbf86ff5635db7afdca1b6b3fd87  /usr/local/bin/mise" | sha256sum -c - \
+ && chmod 755 /usr/local/bin/mise
+ENV MISE_DATA_DIR=/data/tools/mise \
+    MISE_GLOBAL_CONFIG_FILE=/data/tools/mise/config.toml \
+    MISE_TRUSTED_CONFIG_PATHS=/data/workspace \
+    MISE_YES=1 \
+    GOPATH=/data/tools/go \
+    XDG_CACHE_HOME=/data/tools/cache \
+    npm_config_cache=/data/tools/cache/npm \
+    PATH=/data/tools/mise/shims:/data/tools/go/bin:$PATH
 WORKDIR /app
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist

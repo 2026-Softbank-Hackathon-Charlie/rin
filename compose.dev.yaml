@@ -12,6 +12,7 @@ services:
     env_file: .env
     environment:
       DATABASE_URL: postgres://rin:rin@postgres:5432/rin
+    security_opt: [no-new-privileges:true]
     depends_on: [postgres]
   worker:
     profiles: [app]
@@ -24,6 +25,8 @@ services:
       RIN_CLAUDE_CONFIG_DIR: /data/claude
     volumes:
       - ./.data:/data
+    # No sandbox here: Claude runs inside this container, so sudo from the image must not work.
+    security_opt: [no-new-privileges:true]
     stop_grace_period: 5m
     depends_on: [postgres]
   postgres:

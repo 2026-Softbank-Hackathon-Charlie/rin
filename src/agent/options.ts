@@ -23,6 +23,8 @@ const PASS_THROUGH = [
   'PATH', 'HOME', 'USERPROFILE', 'SystemRoot', 'SYSTEMROOT', 'PATHEXT', 'ComSpec', 'TEMP', 'TMP', 'APPDATA', 'LOCALAPPDATA', 'LANG',
   // mermaid-cli (mmdc) finds the image's Chromium through this.
   'PUPPETEER_EXECUTABLE_PATH',
+  // Tools and caches under /data/tools (Dockerfile).
+  'MISE_DATA_DIR', 'MISE_GLOBAL_CONFIG_FILE', 'MISE_TRUSTED_CONFIG_PATHS', 'MISE_YES', 'GOPATH', 'XDG_CACHE_HOME', 'npm_config_cache',
 ];
 
 /** Files under prompts/ appended to the Claude Code system prompt, in this order. */
@@ -66,6 +68,8 @@ export function buildOptions(p: {
   env?: Record<string, string>;
   mcpServers?: Options['mcpServers'];
   stderr?: (data: string) => void;
+  /** Starts Claude Code in a sandbox container (src/worker/sandbox.ts) instead of in this process's container. */
+  spawnClaudeCodeProcess?: Options['spawnClaudeCodeProcess'];
 }): Options {
   const bashHook: HookCallback = async (input) => {
     if (input.hook_event_name !== 'PreToolUse') return {};
@@ -100,5 +104,6 @@ export function buildOptions(p: {
     mcpServers: p.mcpServers,
     env: childEnv(p.env ?? {}),
     stderr: p.stderr,
+    spawnClaudeCodeProcess: p.spawnClaudeCodeProcess,
   };
 }
