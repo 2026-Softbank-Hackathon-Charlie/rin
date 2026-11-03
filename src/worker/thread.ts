@@ -1,12 +1,14 @@
 import type { WebClient } from '@slack/web-api';
 import { config, displayName } from '../config.js';
+import { formatBytes } from '../slack/text.js';
+import type { Attachment } from './attachments.js';
 
 export type SlackMessage = {
   ts: string;
   user?: string;
   bot_id?: string;
   text?: string;
-  files?: unknown[];
+  files?: { id?: string; name?: string }[];
 };
 
 /** Reads every message of a thread, oldest first. */
@@ -27,13 +29,27 @@ function kst(ts: string): string {
   return new Date(Number(ts) * 1000).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', hour12: false });
 }
 
+const defang = (s: string) => s.replace(/<<<|>>>/g, (m) => (m === '<<<' ? '‹‹‹' : '›››'));
+
 /** Rewrites mentions to readable names and neutralises the data-fence markers. */
 export function clean(text: string, botUserId: string): string {
-  return text
-    .replaceAll(`<@${botUserId}>`, '@Rin')
-    .replace(/<@([A-Z0-9]+)>/g, (_m, id: string) => `@${displayName(id)}`)
-    .replace(/<<<|>>>/g, (s) => (s === '<<<' ? '‹‹‹' : '›››'))
-    .trim();
+  return defang(
+    text.replaceAll(`<@${botUserId}>`, '@Rin').replace(/<@([A-Z0-9]+)>/g, (_m, id: string) => `@${displayName(id)}`),
+  ).trim();
+}
+
+/** Lists a message's attached files with the path the worker saved each to, or why it could not. */
+function fileLines(m: SlackMessage, attachments: Map<string, Attachment> | undefined): string {
+  const files = m.files ?? [];
+  if (!files.length) return '';
+  const lines = files.map((f) => {
+    const a = f.id ? attachments?.get(f.id) : undefined;
+    const name = defang((a?.name ?? f.name ?? '이름 없는 파일').replace(/\s+/g, ' ')).replaceAll('[지시]', '(지시)');
+    if (!a) return `- ${name}: 받지 않았다`;
+    const head = `- ${name} (${a.mimetype}, ${formatBytes(a.size)})`;
+    return a.path ? `${head}: ${a.path}` : `${head}: 받지 못했다, ${a.error}`;
+  });
+  return `\n(첨부 파일 ${files.length}개)\n${lines.join('\n')}`;
 }
 
 /**
@@ -50,13 +66,18 @@ export function buildPrompt(p: {
   place?: 'channel' | 'dm';
   /** The previous run of this same request was cut off by a redeploy and is being resumed. */
   resuming?: boolean;
+  /** Files of the thread already saved by the worker, by Slack file id. */
+  attachments?: Map<string, Attachment>;
+  /** Folder of this conversation for received files and files to upload. */
+  filesDir?: string;
   now?: Date;
 }): string {
   const team = config.allowedUsers;
   const parts: string[] = [];
   const now = (p.now ?? new Date()).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', hour12: false });
   const where = p.place === 'dm' ? '팀원과의 Slack DM 스레드' : 'Slack 채널 #final_team_charlie의 스레드';
-  parts.push(`[상황] 지금 시각은 ${now} (KST)이다. ${where}에서 호출되었다.`);
+  const folder = p.filesDir ? ` 이 대화의 파일 폴더는 ${p.filesDir}이다.` : '';
+  parts.push(`[상황] 지금 시각은 ${now} (KST)이다. ${where}에서 호출되었다.${folder}`);
 
   const trigger = p.messages.find((m) => m.ts === p.triggerTs);
   const earlier = p.messages.filter((m) => tsNum(m.ts) < tsNum(p.triggerTs) && tsNum(m.ts) > tsNum(p.sinceTs));
@@ -64,7 +85,7 @@ export function buildPrompt(p: {
   const lines: string[] = [];
   for (const m of earlier) {
     const text = clean(m.text ?? '', p.botUserId);
-    const files = m.files?.length ? `\n(첨부 파일 ${m.files.length}개는 아직 읽을 수 없다)` : '';
+    const files = fileLines(m, p.attachments);
     if (m.user === p.botUserId) {
       if (!p.hasSession && text) lines.push(`[Rin이 앞서 쓴 글, ${kst(m.ts)}]\n${text}`);
     } else if (!m.bot_id && m.user && team.has(m.user)) {
@@ -81,7 +102,7 @@ export function buildPrompt(p: {
   }
 
   const request = clean(trigger?.text ?? '', p.botUserId).replace(/^@Rin\s*/, '');
-  const files = trigger?.files?.length ? `\n(첨부 파일 ${trigger.files.length}개는 아직 읽을 수 없다)` : '';
+  const files = trigger ? fileLines(trigger, p.attachments) : '';
   if (p.resuming) {
     parts.push(
       `[지시] 재배포로 이 요청의 앞선 실행이 중간에 멈췄다. 아래 요청을 이어서 마무리한다. 이미 끝낸 일(커밋, push, PR, 메시지, 예약 등록)은 반복하지 말고, 대화 기록과 실제 상태(git, PR 목록)를 확인해 남은 일만 한다.\n요청자: ${displayName(trigger?.user)}\n${request}${files}`,
