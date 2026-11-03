@@ -33,6 +33,7 @@ export type ThreadRow = {
   channel: string;
   session_id: string | null;
   last_read_ts: string | null;
+  session_cost_usd: string | null;
   updated_at: Date;
 };
 
