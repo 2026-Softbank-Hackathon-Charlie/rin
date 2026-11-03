@@ -71,33 +71,61 @@ export function knownRepos(): string[] {
   return known.map((r) => r.name);
 }
 
+/** A worktree made as its own clone. Older ones were `git worktree add` checkouts whose .git is a file. */
+function isOwnClone(dir: string): boolean {
+  try {
+    return fs.lstatSync(path.join(dir, '.git')).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Deletes a worktree folder and its row. The worker never runs git inside it: Claude has written there.
+ * Worktrees from before the sandbox also left metadata and a branch in the clone under repos/.
+ */
+async function removeWorktree(row: WorktreeRow, token: string | undefined): Promise<void> {
+  fs.rmSync(row.path, { recursive: true, force: true });
+  if (token) {
+    await withLock(row.repo, async () => {
+      const clone = path.join(reposDir(), row.repo);
+      await git(['worktree', 'prune'], token, clone).catch(() => {});
+      await git(['branch', '-D', row.branch], token, clone).catch(() => {});
+    });
+  }
+  await sql`delete from worktrees where id = ${row.id}`;
+}
+
 /**
  * Returns the worktree a thread uses for `repo`, creating it on a new rin/<id> branch from the default branch.
  * One thread keeps one worktree per repo, so follow-up requests continue on the same branch.
+ *
+ * The worktree is a separate clone, not `git worktree add`: a linked worktree writes into the clone's .git,
+ * and the sandbox mounts repos/ read only.
  */
 export async function ensureWorktree(threadTs: string, repo: string): Promise<{ path: string; branch: string; base: string; created: boolean }> {
   await syncRepos();
   const info = known.find((r) => r.name === repo);
   if (!info) throw new Error(`${repo} 레포를 찾을 수 없다. 쓸 수 있는 레포: ${knownRepos().join(', ')}`);
 
+  const token = await installationToken();
   const existing = (await sql<WorktreeRow[]>`select * from worktrees where thread_ts = ${threadTs} and repo = ${repo}`)[0];
-  if (existing && fs.existsSync(existing.path)) {
+  if (existing && isOwnClone(existing.path)) {
     await sql`update worktrees set last_used_at = now() where id = ${existing.id}`;
     return { path: existing.path, branch: existing.branch, base: info.default_branch, created: false };
   }
-  if (existing) await sql`delete from worktrees where id = ${existing.id}`;
+  if (existing) await removeWorktree(existing, token);
 
-  const token = await installationToken();
   if (!token) throw new Error('GitHub App이 설정되지 않았다');
   const id = crypto.randomBytes(3).toString('hex');
   const branch = `rin/${id}`;
   const dir = path.join(worktreesDir(), `${repo}-${id}`);
   fs.mkdirSync(worktreesDir(), { recursive: true });
-  await withLock(repo, async () => {
-    const clone = path.join(reposDir(), repo);
-    await git(['fetch', '--quiet', 'origin', info.default_branch], token, clone);
-    await git(['worktree', 'add', '--quiet', '-b', branch, dir, `origin/${info.default_branch}`], token, clone);
-  });
+  // No hardlinks: the objects of the new clone must not be the same files as those of the read-only clone.
+  await withLock(repo, () => git(['clone', '--quiet', '--no-hardlinks', path.join(reposDir(), repo), dir], token));
+  await git(['remote', 'set-url', 'origin', `https://github.com/${GITHUB_ORG}/${repo}.git`], token, dir);
+  await git(['fetch', '--quiet', 'origin', info.default_branch], token, dir);
+  await git(['checkout', '--quiet', '-b', branch, `origin/${info.default_branch}`], token, dir);
   await sql`insert into worktrees (thread_ts, repo, path, branch) values (${threadTs}, ${repo}, ${dir}, ${branch})`;
   return { path: dir, branch, base: info.default_branch, created: true };
 }
@@ -111,13 +139,7 @@ export async function cleanupWorktrees(): Promise<void> {
     const stale = Date.now() - row.last_used_at.getTime() > 3 * 24 * 3600_000;
     const pr = await prStateForBranch(token, GITHUB_ORG, row.repo, row.branch).catch(() => undefined);
     if (!stale && pr !== 'closed') continue;
-    await withLock(row.repo, async () => {
-      const clone = path.join(reposDir(), row.repo);
-      await git(['worktree', 'remove', '--force', row.path], token, clone).catch(() => fs.rmSync(row.path, { recursive: true, force: true }));
-      await git(['worktree', 'prune'], token, clone).catch(() => {});
-      await git(['branch', '-D', row.branch], token, clone).catch(() => {});
-    });
-    await sql`delete from worktrees where id = ${row.id}`;
+    await removeWorktree(row, token);
     console.log(`removed worktree ${row.path} (${stale ? 'unused for 3 days' : 'PR closed'})`);
   }
 }

@@ -30,7 +30,8 @@ db() { # <docker compose arguments...>
 }
 
 app() { # <docker compose arguments...> for the new version
-  RIN_IMAGE="$image" RIN_VERSION="$version" \
+  # The worker joins the group that owns the Docker socket to start sandbox containers.
+  RIN_IMAGE="$image" RIN_VERSION="$version" DOCKER_GID="$(stat -c %g /var/run/docker.sock)" \
     docker compose -p "$project" -f "$dir/compose.app.yaml" --env-file "$env_file" "$@"
 }
 

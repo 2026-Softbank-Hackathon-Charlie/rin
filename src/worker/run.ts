@@ -15,6 +15,7 @@ import { syncRepos } from './repos.js';
 import { StatusMessage } from './status.js';
 import { requeueForResume } from './coord.js';
 import { runCost } from './cost.js';
+import { sandboxSpawner } from './sandbox.js';
 import { buildPrompt, buildSchedulePrompt, fetchThread } from './thread.js';
 
 export type AbortReason = { kind: 'cancel'; by: string } | { kind: 'shutdown' };
@@ -90,6 +91,7 @@ async function execute(p: {
   onLog?: (lines: string[], toolCalls: number) => void;
 }): Promise<Execution> {
   const out: Execution = { sawAssistant: false };
+  const stderr = (s: string) => console.error(`[job ${p.job.id}] ${s.trimEnd()}`);
   try {
     const run = query({
       prompt: p.prompt,
@@ -108,7 +110,8 @@ async function execute(p: {
             thread: p.thread,
           }),
         },
-        stderr: (s) => console.error(`[job ${p.job.id}] ${s.trimEnd()}`),
+        stderr,
+        spawnClaudeCodeProcess: sandboxSpawner(p.job.id, stderr),
       }),
     });
     for await (const m of run) {

@@ -1,7 +1,8 @@
 # One Rin version (gateway and worker) on the EC2 host. deploy/ec2/deploy.sh starts it as its own
 # compose project next to the running version, so old and new overlap during a handoff:
-#   RIN_IMAGE=<image> RIN_VERSION=<short sha> docker compose -p rin-<short sha> -f compose.app.yaml --env-file /run/rin.env up -d
+#   RIN_IMAGE=<image> RIN_VERSION=<short sha> DOCKER_GID=<gid of docker.sock> docker compose -p rin-<short sha> -f compose.app.yaml --env-file /run/rin.env up -d
 # Postgres runs separately (compose.db.yaml) on the network rin_default.
+# Claude does not run in these containers: the worker starts a sandbox container per run (src/worker/sandbox.ts).
 services:
   gateway:
     image: ${RIN_IMAGE:?RIN_IMAGE is not set}
@@ -11,6 +12,9 @@ services:
     environment:
       DATABASE_URL: postgres://rin:${POSTGRES_PASSWORD}@postgres:5432/rin
       RIN_VERSION: ${RIN_VERSION:?RIN_VERSION is not set}
+    # The image has sudo for the sandbox; this keeps it from working here.
+    security_opt:
+      - no-new-privileges:true
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8081/healthz"]
       interval: 10s
@@ -24,8 +28,17 @@ services:
     environment:
       DATABASE_URL: postgres://rin:${POSTGRES_PASSWORD}@postgres:5432/rin
       RIN_VERSION: ${RIN_VERSION:?RIN_VERSION is not set}
+      RIN_SANDBOX_IMAGE: ${RIN_IMAGE}
+      RIN_SANDBOX_HOST_DATA: /srv/rin/data
+      RIN_SANDBOX_NETWORK: rin_default
     volumes:
       - /srv/rin/data:/data
+      # For starting sandboxes. The worker runs no code Claude wrote, and the sandboxes do not get the socket.
+      - /var/run/docker.sock:/var/run/docker.sock
+    group_add:
+      - ${DOCKER_GID:?DOCKER_GID is not set}
+    security_opt:
+      - no-new-privileges:true
     # deploy.sh drains an old worker with SIGTERM (no timeout). This only matters for a manual
     # `docker compose stop`, which waits this long for running jobs before killing.
     stop_grace_period: 5m
