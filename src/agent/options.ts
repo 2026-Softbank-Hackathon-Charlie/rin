@@ -40,6 +40,9 @@ function childEnv(extra: Record<string, string>): Record<string, string> {
   env.CLAUDE_CONFIG_DIR = config.claudeConfigDir;
   env.CLAUDE_AGENT_SDK_CLIENT_APP = 'rin/0.1';
   env.TZ = 'Asia/Seoul';
+  // Keep the main conversation's prompt cache for an hour instead of the API-key default of 5 minutes.
+  // Writes cost 1.6x, but a thread called again a few minutes later reads its history instead of rewriting it.
+  env.CLAUDE_CODE_PROMPT_CACHE_TTL = '1h';
   return { ...env, ...extra };
 }
 
