@@ -2,7 +2,8 @@ import postgres from 'postgres';
 import { need } from '../config.js';
 import { migrations } from './migrations.js';
 
-export const sql = postgres(need('DATABASE_URL'), { max: 5, onnotice: () => {} });
+// Git operations hold a transaction-level advisory lock for their duration, so leave room in the pool.
+export const sql = postgres(need('DATABASE_URL'), { max: 10, onnotice: () => {} });
 
 export type JobStatus = 'queued' | 'running' | 'done' | 'failed' | 'cancelled' | 'interrupted';
 
@@ -18,6 +19,8 @@ export type Job = {
   status_ts: string | null;
   cancel_requested_by: string | null;
   schedule_id: number | null;
+  worker_id: string | null;
+  resumed: number;
   cost_usd: string | null;
   error: string | null;
   created_at: Date;

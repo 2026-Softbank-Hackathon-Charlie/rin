@@ -25,7 +25,7 @@ RUN ln -s /app/node_modules/@anthropic-ai/claude-agent-sdk-linux-x64/claude /usr
 COPY package.json ./
 COPY prompts ./prompts
 COPY workspace-template ./workspace-template
-COPY deploy/compose.yaml ./deploy/compose.yaml
+COPY deploy/compose.db.yaml deploy/compose.app.yaml ./deploy/
 # The deploy workflow copies these two files out of the new image onto the EC2 host.
 COPY deploy/ec2/deploy.sh ./deploy/ec2/deploy.sh
 ENV NODE_ENV=production \

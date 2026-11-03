@@ -1,22 +1,8 @@
-# EC2 deployment. deploy/ec2/deploy.sh runs:
-#   RIN_IMAGE=<ecr image> docker compose --env-file /run/rin.env -f compose.yaml up -d
-# /run/rin.env holds the secrets read from SSM (/rin/*), including POSTGRES_PASSWORD.
-name: rin
+# One Rin version (gateway and worker) on the EC2 host. deploy/ec2/deploy.sh starts it as its own
+# compose project next to the running version, so old and new overlap during a handoff:
+#   RIN_IMAGE=<image> RIN_VERSION=<short sha> docker compose -p rin-<short sha> -f compose.app.yaml --env-file /run/rin.env up -d
+# Postgres runs separately (compose.db.yaml) on the network rin_default.
 services:
-  postgres:
-    image: postgres:16
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: rin
-      POSTGRES_DB: rin
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is not set}
-    volumes:
-      - /srv/rin/pg:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U rin"]
-      interval: 5s
-      retries: 30
-
   gateway:
     image: ${RIN_IMAGE:?RIN_IMAGE is not set}
     restart: unless-stopped
@@ -24,9 +10,7 @@ services:
     env_file: /run/rin.env
     environment:
       DATABASE_URL: postgres://rin:${POSTGRES_PASSWORD}@postgres:5432/rin
-    depends_on:
-      postgres:
-        condition: service_healthy
+      RIN_VERSION: ${RIN_VERSION:?RIN_VERSION is not set}
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8081/healthz"]
       interval: 10s
@@ -39,14 +23,18 @@ services:
     env_file: /run/rin.env
     environment:
       DATABASE_URL: postgres://rin:${POSTGRES_PASSWORD}@postgres:5432/rin
+      RIN_VERSION: ${RIN_VERSION:?RIN_VERSION is not set}
     volumes:
       - /srv/rin/data:/data
-    # The worker finishes running jobs for up to 4 minutes before it stops.
+    # deploy.sh drains an old worker with SIGTERM (no timeout). This only matters for a manual
+    # `docker compose stop`, which waits this long for running jobs before killing.
     stop_grace_period: 5m
-    depends_on:
-      postgres:
-        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8080/healthz"]
       interval: 10s
       retries: 6
+
+networks:
+  default:
+    name: rin_default
+    external: true

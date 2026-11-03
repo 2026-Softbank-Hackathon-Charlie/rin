@@ -11,6 +11,7 @@ import { statusBlocks } from '../slack/blocks.js';
 import { formatDuration, formatUsd, splitMessage, tail } from '../slack/text.js';
 import { syncRepos } from './repos.js';
 import { StatusMessage } from './status.js';
+import { requeueForResume } from './coord.js';
 import { buildPrompt, buildSchedulePrompt, fetchThread } from './thread.js';
 
 export type AbortReason = { kind: 'cancel'; by: string } | { kind: 'shutdown' };
@@ -131,7 +132,7 @@ async function runSlackJob(job: Job, deps: Deps): Promise<void> {
     text: header.replace(/\*/g, ''),
     blocks: statusBlocks({ header, log: tail(log, config.logTailChars), jobId: job.id, cancellable }),
   });
-  status?.push(frame(`*Rin* 시작하는 중 | ${model}`, true));
+  status?.push(frame(job.resumed > 0 ? `*Rin* 이어서 진행하는 중 | ${model}` : `*Rin* 시작하는 중 | ${model}`, true));
 
   const thread = (await sql<ThreadRow[]>`select * from threads where thread_ts = ${threadTs}`)[0];
   const messages = await fetchThread(client, job.channel, threadTs);
@@ -154,6 +155,7 @@ async function runSlackJob(job: Job, deps: Deps): Promise<void> {
         botUserId,
         hasSession: !!resume,
         place,
+        resuming: job.resumed > 0,
       }),
       onSession: (id) => saveThread(threadTs, job.channel, id, null),
       onLog: (lines, n) => {
@@ -178,16 +180,22 @@ async function runSlackJob(job: Job, deps: Deps): Promise<void> {
 
   if (handle.controller.signal.aborted) {
     const reason = handle.reason ?? { kind: 'cancel', by: '' };
+    // A redeploy cut this run off: queue it again so the next worker resumes the same session.
+    if (reason.kind === 'shutdown' && (await requeueForResume(job.id, cost))) {
+      await status?.close(frame('*Rin* 재배포로 잠시 멈춤 | 곧 이어서 진행합니다', true));
+      return;
+    }
     const header =
       reason.kind === 'cancel' ? `*Rin* 취소됨 | ${displayName(reason.by)}님이 취소 | ${elapsed}` : `*Rin* 재시작으로 중단됨 | ${elapsed}`;
     await sql`update jobs set status = ${reason.kind === 'cancel' ? 'cancelled' : 'interrupted'},
-              cost_usd = ${cost}, finished_at = now() where id = ${job.id}`;
+              cost_usd = coalesce(cost_usd, 0) + ${cost ?? 0}, finished_at = now()
+              where id = ${job.id} and status = 'running'`;
     await status?.close(frame(header, false));
     return;
   }
 
   if (exec.result?.subtype === 'success') {
-    await sql`update jobs set status = 'done', cost_usd = ${cost}, finished_at = now() where id = ${job.id}`;
+    await sql`update jobs set status = 'done', cost_usd = coalesce(cost_usd, 0) + ${cost ?? 0}, finished_at = now() where id = ${job.id}`;
     const footer = `_소요 ${elapsed} | 이번 ${formatUsd(cost ?? 0)} | 이번 달 ${formatUsd(await monthCostUsd())} | ${model}_`;
     const [head, ...rest] = splitMessage(`${exec.result.result.trim() || '(답이 비어 있다)'}\n\n${footer}`);
     if (status) await status.close({ text: head ?? footer, blocks: [] });
@@ -198,7 +206,7 @@ async function runSlackJob(job: Job, deps: Deps): Promise<void> {
 
   const reason = failureReason(exec.result, exec.error);
   console.error(`job ${job.id} failed: ${reason}`, exec.error);
-  await sql`update jobs set status = 'failed', cost_usd = ${cost}, error = ${reason}, finished_at = now() where id = ${job.id}`;
+  await sql`update jobs set status = 'failed', cost_usd = coalesce(cost_usd, 0) + ${cost ?? 0}, error = ${reason}, finished_at = now() where id = ${job.id}`;
   await status?.close(frame(`*Rin* 실패 | ${reason} | ${elapsed}`, false));
 }
 
@@ -226,8 +234,11 @@ async function runScheduleJob(job: Job, deps: Deps): Promise<void> {
   const cost = exec.result?.total_cost_usd ?? null;
 
   if (handle.controller.signal.aborted) {
+    // A redeploy cut it off: run it again on the next worker (schedule runs keep no session, so it starts over).
+    if (handle.reason?.kind === 'shutdown' && (await requeueForResume(job.id, cost))) return;
     const kind = handle.reason?.kind === 'cancel' ? 'cancelled' : 'interrupted';
-    await sql`update jobs set status = ${kind}, cost_usd = ${cost}, finished_at = now() where id = ${job.id}`;
+    await sql`update jobs set status = ${kind}, cost_usd = coalesce(cost_usd, 0) + ${cost ?? 0}, finished_at = now()
+              where id = ${job.id} and status = 'running'`;
     return;
   }
 
@@ -239,14 +250,14 @@ async function runScheduleJob(job: Job, deps: Deps): Promise<void> {
     for (const chunk of rest) await client.chat.postMessage({ channel: job.channel, thread_ts: ts, text: chunk });
     // A mention in this thread continues the scheduled run's session.
     if (exec.sessionId) await saveThread(ts, job.channel, exec.sessionId, ts);
-    await sql`update jobs set status = 'done', thread_ts = ${ts}, cost_usd = ${cost}, finished_at = now() where id = ${job.id}`;
+    await sql`update jobs set status = 'done', thread_ts = ${ts}, cost_usd = coalesce(cost_usd, 0) + ${cost ?? 0}, finished_at = now() where id = ${job.id}`;
     if (job.schedule_id) await sql`update schedules set fail_streak = 0 where id = ${job.schedule_id}`;
     return;
   }
 
   const reason = failureReason(exec.result, exec.error);
   console.error(`schedule job ${job.id} failed: ${reason}`, exec.error);
-  await sql`update jobs set status = 'failed', cost_usd = ${cost}, error = ${reason}, finished_at = now() where id = ${job.id}`;
+  await sql`update jobs set status = 'failed', cost_usd = coalesce(cost_usd, 0) + ${cost ?? 0}, error = ${reason}, finished_at = now() where id = ${job.id}`;
   const posted = await client.chat.postMessage({ channel: job.channel, text: `*[예약] ${title}* 실패: ${reason}` });
   if (!job.schedule_id) return;
   const [row] = await sql<{ fail_streak: number }[]>`

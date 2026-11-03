@@ -1,10 +1,19 @@
 #!/usr/bin/env bash
-# Deploys one Rin image on the EC2 host and rolls back to the previous image
-# when the new one does not become healthy.
+# Hands Rin over to a new image on the EC2 host without cutting running work.
 #   bash /srv/rin/deploy.sh <image>
-# Runs as root through SSM Run Command (.github/workflows/deploy.yml), after
-# the workflow has pulled <image> and copied this file and deploy/compose.yaml
+# Runs as root through SSM Run Command (.github/workflows/deploy.yml), after the workflow
+# has pulled <image> and copied this file, deploy/compose.db.yaml and deploy/compose.app.yaml
 # out of it into /srv/rin.
+#
+# 1. Postgres keeps running as compose project "rin" (compose.db.yaml).
+# 2. The new gateway and worker start next to the running ones as project rin-<short sha>.
+# 3. If they do not become healthy they are removed. The running version never noticed,
+#    so this is the whole rollback.
+# 4. Once healthy, old gateways are removed. Socket Mode accepts several connections and
+#    gives each event to one of them, so no mention is lost during the overlap.
+# 5. Old workers get SIGTERM and will not restart: they take no new jobs, finish the ones
+#    they run (up to 2 hours) and exit on their own. The workers share one concurrency
+#    limit through the database, so the overlap never runs more Claude sessions than usual.
 set -euo pipefail
 
 image="${1:?usage: deploy.sh <image>}"
@@ -12,16 +21,17 @@ region=ap-northeast-2
 dir=/srv/rin
 env_file=/run/rin.env
 health_timeout=180
+tag="${image##*:}"
+version="${tag:0:7}"
+project="rin-$version"
 
-short() { # <image>: the first 7 characters of its tag
-  local tag="${1##*:}"
-  printf '%s' "${tag:0:7}"
+db() { # <docker compose arguments...>
+  docker compose -p rin -f "$dir/compose.db.yaml" --env-file "$env_file" "$@"
 }
 
-compose() { # <image> <docker compose arguments...>
-  local img="$1"
-  shift
-  RIN_IMAGE="$img" docker compose -p rin -f "$dir/compose.yaml" --env-file "$env_file" "$@"
+app() { # <docker compose arguments...> for the new version
+  RIN_IMAGE="$image" RIN_VERSION="$version" \
+    docker compose -p "$project" -f "$dir/compose.app.yaml" --env-file "$env_file" "$@"
 }
 
 # Every /rin/<KEY> parameter becomes KEY=VALUE. /run is tmpfs, so the secrets
@@ -38,17 +48,18 @@ write_env() {
   mv -f "$tmp" "$env_file"
 }
 
-# Waits up to $health_timeout seconds for gateway and worker to be healthy.
-wait_healthy() { # <image>
-  local deadline=$((SECONDS + health_timeout)) svc id status
-  for svc in gateway worker; do
+# Waits up to $health_timeout seconds for the services to be healthy.
+wait_healthy() { # <db|app> <service...>
+  local fn="$1" deadline=$((SECONDS + health_timeout)) svc id status
+  shift
+  for svc in "$@"; do
     while :; do
-      id="$(compose "$1" ps -q "$svc" || true)"
+      id="$("$fn" ps -q "$svc" || true)"
       status="$(docker inspect -f '{{.State.Health.Status}}' "$id" 2>/dev/null || true)"
       [ "$status" = healthy ] && break
       if [ "$SECONDS" -ge "$deadline" ]; then
         echo "$svc is ${status:-not running} after ${health_timeout}s" >&2
-        compose "$1" logs --no-color --tail 40 "$svc" >&2 || true
+        "$fn" logs --no-color --tail 40 "$svc" >&2 || true
         return 1
       fi
       sleep 5
@@ -57,39 +68,40 @@ wait_healthy() { # <image>
   done
 }
 
-deploy() { # <image>
-  echo "starting $1"
-  compose "$1" up -d && wait_healthy "$1"
+# Containers of a service that belong to another version: "<id> <project> <state>" per line.
+others() { # <service>
+  docker ps -a --filter "label=com.docker.compose.service=$1" \
+    --format '{{.ID}} {{.Label "com.docker.compose.project"}} {{.State}}' |
+    awk -v p="$project" '$2 != p'
 }
 
-# The result goes only to the SSM command output, which the workflow prints.
-# There is no Slack notice: the team checks the Actions run.
-notify() { # <text>
-  echo "result: $1" >&2
-}
-
-prev="$(cat "$dir/current-image" 2>/dev/null || true)"
 write_env
-echo "deploying $image (previous: ${prev:-none})"
+db up -d
+wait_healthy db postgres
 
-# compose up -d returns only after the old worker has stopped (stop_grace_period
-# 5m), so the health clock starts after it.
-if deploy "$image"; then
-  printf '%s\n' "$image" > "$dir/current-image"
-  notify "Rin 배포 완료: $(short "$image")"
-  docker image prune -af --filter until=168h || echo "image prune failed" >&2
-  echo "deployed $image"
-  exit 0
+echo "starting $project ($image) next to the running version"
+if ! { app up -d && wait_healthy app gateway worker; }; then
+  echo "result: $version did not become healthy; removed it, the running version keeps serving" >&2
+  app down || true
+  exit 1
 fi
 
-echo "deploy of $image failed" >&2
-if [ -n "$prev" ] && [ "$prev" != "$image" ]; then
-  if deploy "$prev"; then
-    notify "Rin 배포 실패: $(short "$image"), $(short "$prev")로 되돌렸습니다"
+others gateway | while read -r id proj _; do
+  echo "removing the gateway of $proj"
+  docker rm -f "$id" > /dev/null
+done
+
+others worker | while read -r id proj state; do
+  if [ "$state" = running ]; then
+    docker update --restart=no "$id" > /dev/null
+    docker kill --signal=SIGTERM "$id" > /dev/null
+    echo "the worker of $proj is draining: it finishes its jobs and exits"
   else
-    notify "Rin 배포 실패: $(short "$image"), $(short "$prev")로 되돌렸지만 정상 상태가 되지 않았습니다"
+    docker rm "$id" > /dev/null
+    echo "removed the stopped worker of $proj"
   fi
-else
-  notify "Rin 배포 실패: $(short "$image"), 되돌릴 이전 이미지가 없습니다"
-fi
-exit 1
+done
+
+printf '%s\n' "$image" > "$dir/current-image"
+docker image prune -af --filter until=168h > /dev/null || echo "image prune failed" >&2
+echo "result: deployed $version"
