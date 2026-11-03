@@ -18,6 +18,16 @@ RUN apt-get update \
  && mkdir -p /data && chown node:node /data \
  # git over HTTPS authenticates with the installation token in $GH_TOKEN; the token never lands in .git/config.
  && git config --system credential.https://github.com.helper '!f() { echo username=x-access-token; echo "password=$GH_TOKEN"; }; f'
+# Chromium, Korean fonts and mermaid-cli let Claude render diagrams and HTML pages to PNG
+# (workspace-template/skills/visuals). puppeteer uses the system Chromium instead of downloading one.
+# The container has no user namespaces for Chromium's sandbox, so the Debian launcher adds --no-sandbox.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends chromium fonts-noto-cjk \
+ && rm -rf /var/lib/apt/lists/* \
+ && echo 'export CHROMIUM_FLAGS="$CHROMIUM_FLAGS --no-sandbox"' > /etc/chromium.d/rin-no-sandbox \
+ && PUPPETEER_SKIP_DOWNLOAD=true npm install -g @mermaid-js/mermaid-cli@12.0.0 puppeteer@25.14.0 \
+ && npm cache clean --force
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 WORKDIR /app
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist

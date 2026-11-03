@@ -19,7 +19,7 @@ Rin이 자기 자신을 고칠 때, 그리고 팀원이 이 레포를 고칠 때
 - `src/slack/`: 메시지 나누기, 상태 메시지 블록
 - `src/db/`: Postgres 접근과 마이그레이션
 - `prompts/`: 시스템 프롬프트에 붙는 글. 붙는 순서는 `src/agent/options.ts`의 `PROMPT_FILES`다. `rin.md`는 팀 규칙, `hackathon.md`는 해커톤 문맥, `korean.md`는 한국어 글쓰기와 문자 규칙, `karpathy.md`는 코드 작업 지침이다
-- `workspace-template/`: 작업 공간을 처음 만들 때 복사하는 파일
+- `workspace-template/`: 작업 공간을 처음 만들 때 복사하는 파일. `skills/` 아래 스킬은 worker가 시작할 때마다 작업 공간의 `.claude/skills/`에 덮어쓴다
 
 ## 고칠 때 지킬 것
 

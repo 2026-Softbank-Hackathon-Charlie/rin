@@ -19,7 +19,11 @@ const DISALLOWED_TOOLS = [
 ];
 
 /** Variables passed through to the Claude Code process. The SDK `env` option replaces the whole environment. */
-const PASS_THROUGH = ['PATH', 'HOME', 'USERPROFILE', 'SystemRoot', 'SYSTEMROOT', 'PATHEXT', 'ComSpec', 'TEMP', 'TMP', 'APPDATA', 'LOCALAPPDATA', 'LANG'];
+const PASS_THROUGH = [
+  'PATH', 'HOME', 'USERPROFILE', 'SystemRoot', 'SYSTEMROOT', 'PATHEXT', 'ComSpec', 'TEMP', 'TMP', 'APPDATA', 'LOCALAPPDATA', 'LANG',
+  // mermaid-cli (mmdc) finds the image's Chromium through this.
+  'PUPPETEER_EXECUTABLE_PATH',
+];
 
 /** Files under prompts/ appended to the Claude Code system prompt, in this order. */
 export const PROMPT_FILES = ['rin.md', 'hackathon.md', 'korean.md', 'karpathy.md'];

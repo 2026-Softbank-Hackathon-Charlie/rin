@@ -14,4 +14,4 @@
 - `repos/`: 팀 레포의 읽기용 clone. 직접 고치지 않는다.
 - `worktrees/`: 코드를 고칠 때 만드는 worktree.
 - `memory/`: Claude Code 자동 메모리.
-- `.claude/skills/`: 팀과 일하면서 만든 스킬.
+- `.claude/skills/`: 팀과 일하면서 만든 스킬. `visuals`처럼 rin 레포의 `workspace-template/skills/`에 있는 스킬은 배포할 때마다 레포 내용으로 덮어쓰므로, 고치려면 rin 레포에서 고친다.
