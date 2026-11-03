@@ -21,7 +21,7 @@ async function reply(client: WebClient, channel: string, threadTs: string, text:
 async function handleModel(client: WebClient, channel: string, threadTs: string, arg: string | undefined): Promise<void> {
   if (!arg) {
     const current = (await getSetting('model')) ?? config.defaultModel;
-    await reply(client, channel, threadTs, `지금 모델은 \`${current}\`입니다. 기본값은 \`${config.defaultModel}\`입니다. 바꾸려면 \`@Rin 모델 claude-opus-5-5\`처럼 씁니다.`);
+    await reply(client, channel, threadTs, `지금 모델은 \`${current}\`입니다. 기본값은 \`${config.defaultModel}\`입니다. 바꾸려면 \`@Rin 모델 claude-sonnet-5-5\`처럼 씁니다.`);
     return;
   }
   if (!/^claude-[a-z0-9-]+$/.test(arg)) {
