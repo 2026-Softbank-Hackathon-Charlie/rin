@@ -6,7 +6,7 @@ Rin이 자기 자신을 고칠 때, 그리고 팀원이 이 레포를 고칠 때
 
 - `src/gateway/main.ts`: 채널 멘션과 DM 수신, 호출 게이트, 취소 버튼, `@Rin 모델` 명령
 - `src/worker/main.ts`: 큐 소비, 동시 실행 제한, 취소 감지, 예약 디스패치, 종료 시 작업 마무리
-- `src/worker/run.ts`: 작업 하나의 실행. Slack 요청은 상태 메시지와 스레드 답, 예약 작업은 채널 본문 글
+- `src/worker/run.ts`: 작업 하나의 실행. Slack 요청은 상태 메시지와 스레드 답, 예약 작업은 채널 본문 글(announce가 false면 채널에 올리지 않고 실패만 등록자 DM)
 - `src/worker/thread.ts`: 스레드 글을 프롬프트로 바꾼다. 팀원 글은 지시, 그 밖은 자료로 감싼다
 - `src/worker/coord.ts`: worker 사이의 약속(하트비트, 리더, 전체 동시 실행 상한, 끊긴 작업 재개)
 - `src/worker/sandbox.ts`: 실행마다 Claude Code를 띄우는 샌드박스 컨테이너, 남은 샌드박스 정리

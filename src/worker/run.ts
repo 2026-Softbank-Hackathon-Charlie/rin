@@ -241,6 +241,17 @@ async function runSlackJob(job: Job, deps: Deps): Promise<void> {
   await status?.close(frame(`*Rin* 실패 | ${reason} | ${elapsed}`, false));
 }
 
+/** The DM channel with a team member, or undefined if it cannot be opened. */
+async function dmChannel(client: WebClient, user: string | null): Promise<string | undefined> {
+  if (!user || !config.allowedUsers.has(user)) return undefined;
+  try {
+    return (await client.conversations.open({ users: user })).channel?.id;
+  } catch (err) {
+    console.error(`could not open a DM with ${user}`, err instanceof Error ? err.message : err);
+    return undefined;
+  }
+}
+
 /** A scheduled run: no status message; the answer goes to the team channel as a new message, overflow in its thread. */
 async function runScheduleJob(job: Job, deps: Deps): Promise<void> {
   const { client, handle } = deps;
@@ -249,6 +260,7 @@ async function runScheduleJob(job: Job, deps: Deps): Promise<void> {
   const label = modelLabel(model, config.effort);
   const schedule = job.schedule_id ? (await sql<ScheduleRow[]>`select * from schedules where id = ${job.schedule_id}`)[0] : undefined;
   const title = schedule?.title ?? `예약 작업 ${job.schedule_id ?? ''}`.trim();
+  const announce = schedule?.announce ?? true;
   const env = await toolEnv();
 
   const exec = await execute({
@@ -257,7 +269,7 @@ async function runScheduleJob(job: Job, deps: Deps): Promise<void> {
     model,
     mergeAllowed: false,
     env,
-    prompt: buildSchedulePrompt({ id: job.schedule_id ?? 0, title, prompt: job.prompt, createdBy: job.requester ?? '' }),
+    prompt: buildSchedulePrompt({ id: job.schedule_id ?? 0, title, prompt: job.prompt, createdBy: job.requester ?? '', announce }),
     onSession: async () => {},
   });
 
@@ -270,6 +282,12 @@ async function runScheduleJob(job: Job, deps: Deps): Promise<void> {
     const kind = handle.reason?.kind === 'cancel' ? 'cancelled' : 'interrupted';
     await sql`update jobs set status = ${kind}, cost_usd = coalesce(cost_usd, 0) + ${cost ?? 0}, finished_at = now()
               where id = ${job.id} and status = 'running'`;
+    return;
+  }
+
+  if (exec.result?.subtype === 'success' && !announce) {
+    await sql`update jobs set status = 'done', cost_usd = coalesce(cost_usd, 0) + ${cost ?? 0}, finished_at = now() where id = ${job.id}`;
+    if (job.schedule_id) await sql`update schedules set fail_streak = 0 where id = ${job.schedule_id}`;
     return;
   }
 
@@ -292,14 +310,16 @@ async function runScheduleJob(job: Job, deps: Deps): Promise<void> {
   const reason = failureReason(exec.result, exec.error);
   console.error(`schedule job ${job.id} failed: ${reason}`, exec.error);
   await sql`update jobs set status = 'failed', cost_usd = coalesce(cost_usd, 0) + ${cost ?? 0}, error = ${reason}, finished_at = now() where id = ${job.id}`;
-  const posted = await client.chat.postMessage({ channel: job.channel, text: `*[예약] ${title}* 실패: ${reason}` });
+  // A quiet schedule reports its failure to the creator by DM instead of the team channel.
+  const dm = announce ? undefined : await dmChannel(client, job.requester);
+  const posted = await client.chat.postMessage({ channel: dm ?? job.channel, text: `*[예약] ${title}* 실패: ${reason}` });
   if (!job.schedule_id) return;
   const [row] = await sql<{ fail_streak: number }[]>`
     update schedules set fail_streak = fail_streak + 1 where id = ${job.schedule_id} returning fail_streak`;
   if (row && row.fail_streak >= 3) {
     await sql`update schedules set enabled = false where id = ${job.schedule_id}`;
     await client.chat.postMessage({
-      channel: job.channel,
+      channel: dm ?? job.channel,
       thread_ts: posted.ts,
       text: `예약 #${job.schedule_id}이 연속 3번 실패해서 껐습니다. 원인을 고친 뒤 \`@Rin 예약 #${job.schedule_id} 다시 켜줘\`라고 하면 됩니다.`,
     });

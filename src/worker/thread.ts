@@ -114,10 +114,21 @@ export function buildPrompt(p: {
 }
 
 /** Prompt for a scheduled run. The result is posted to the team channel as a new message. */
-export function buildSchedulePrompt(p: { id: number; title: string; prompt: string; createdBy: string; now?: Date }): string {
+export function buildSchedulePrompt(p: {
+  id: number;
+  title: string;
+  prompt: string;
+  createdBy: string;
+  announce?: boolean;
+  now?: Date;
+}): string {
   const now = (p.now ?? new Date()).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', hour12: false });
+  const where =
+    p.announce === false
+      ? '네 답은 Slack 어디에도 올라가지 않고 작업 기록에만 남으니, 한 일을 한 줄로만 적는다. 실패하면 등록자에게 DM으로 알려진다.'
+      : '네 답은 팀 채널 #final_team_charlie 본문에 새 글로 올라간다.';
   return [
-    `[상황] 지금 시각은 ${now} (KST)이다. 예약 작업 #${p.id} "${p.title}"이 정해진 시각에 실행되었다. 네 답은 팀 채널 #final_team_charlie 본문에 새 글로 올라간다. 이 실행에서는 PR을 머지하지 않는다.`,
+    `[상황] 지금 시각은 ${now} (KST)이다. 예약 작업 #${p.id} "${p.title}"이 정해진 시각에 실행되었다. ${where} 이 실행에서는 PR을 머지하지 않는다.`,
     `[지시] 예약 작업 내용, ${displayName(p.createdBy)}님이 등록\n${p.prompt}`,
   ].join('\n\n');
 }

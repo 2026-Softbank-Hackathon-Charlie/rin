@@ -118,4 +118,11 @@ export const migrations: { id: number; sql: string }[] = [
       do $$ begin execute format('revoke temporary on database %I from public', current_database()); end $$;
     `,
   },
+  {
+    id: 6,
+    sql: `
+      -- false: the run does its work (a DM, for example) without posting a result to the team channel.
+      alter table schedules add column announce boolean not null default true;
+    `,
+  },
 ];
