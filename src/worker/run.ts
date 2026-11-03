@@ -13,6 +13,7 @@ import { fetchAttachments, threadDir } from './attachments.js';
 import { syncRepos } from './repos.js';
 import { StatusMessage } from './status.js';
 import { requeueForResume } from './coord.js';
+import { runCost } from './cost.js';
 import { buildPrompt, buildSchedulePrompt, fetchThread } from './thread.js';
 
 export type AbortReason = { kind: 'cancel'; by: string } | { kind: 'shutdown' };
@@ -27,6 +28,12 @@ async function saveThread(threadTs: string, channel: string, sessionId: string, 
       session_id = excluded.session_id,
       last_read_ts = coalesce(excluded.last_read_ts, threads.last_read_ts),
       updated_at = now()`;
+}
+
+/** Remember the session's running total so the next run on this thread reports only its own cost. */
+async function saveSessionCost(threadTs: string, total: number | null): Promise<void> {
+  if (total == null) return;
+  await sql`update threads set session_cost_usd = ${total} where thread_ts = ${threadTs}`;
 }
 
 function failureReason(result: SDKResultMessage | undefined, error: unknown): string {
@@ -184,17 +191,23 @@ async function runSlackJob(job: Job, deps: Deps): Promise<void> {
     });
 
   let exec = await attempt(thread?.session_id ?? undefined);
+  let before = thread?.session_id ? Number(thread.session_cost_usd ?? 0) : 0;
   const resumeFailed =
     thread?.session_id && !exec.sawAssistant && !handle.controller.signal.aborted && (exec.error || exec.result?.subtype !== 'success');
   if (resumeFailed) {
     console.warn(`job ${job.id}: resume of ${thread?.session_id} failed, starting a new session`, exec.error);
     log += '(이전 세션을 이어 가지 못해 새 세션으로 다시 시작한다)\n';
     exec = await attempt(undefined);
+    before = 0;
   }
 
   const elapsed = formatDuration(Date.now() - started);
-  const cost = exec.result?.total_cost_usd ?? null;
-  if (exec.sessionId) await saveThread(threadTs, job.channel, exec.sessionId, job.trigger_ts);
+  const total = exec.result?.total_cost_usd ?? null;
+  const cost = runCost(total, before);
+  if (exec.sessionId) {
+    await saveThread(threadTs, job.channel, exec.sessionId, job.trigger_ts);
+    await saveSessionCost(threadTs, total);
+  }
 
   if (handle.controller.signal.aborted) {
     const reason = handle.reason ?? { kind: 'cancel', by: '' };
@@ -267,7 +280,10 @@ async function runScheduleJob(job: Job, deps: Deps): Promise<void> {
     const ts = posted.ts!;
     for (const chunk of rest) await client.chat.postMessage({ channel: job.channel, thread_ts: ts, text: chunk });
     // A mention in this thread continues the scheduled run's session.
-    if (exec.sessionId) await saveThread(ts, job.channel, exec.sessionId, ts);
+    if (exec.sessionId) {
+      await saveThread(ts, job.channel, exec.sessionId, ts);
+      await saveSessionCost(ts, cost);
+    }
     await sql`update jobs set status = 'done', thread_ts = ${ts}, cost_usd = coalesce(cost_usd, 0) + ${cost ?? 0}, finished_at = now() where id = ${job.id}`;
     if (job.schedule_id) await sql`update schedules set fail_streak = 0 where id = ${job.schedule_id}`;
     return;
