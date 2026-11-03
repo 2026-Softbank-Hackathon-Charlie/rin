@@ -15,7 +15,8 @@
   2. 이미지를 빌드해 ECR `hopcharlie/rin:<커밋 sha>`에 올린다.
   3. SSM Run Command로 EC2에서 새 이미지의 `deploy/ec2/deploy.sh`와 `deploy/compose.yaml`을 꺼내 `/srv/rin`에 두고 `deploy.sh`를 실행한다.
 - `deploy.sh`는 SSM `/rin/*`의 비밀값을 `/run/rin.env`에 쓰고, `docker compose`로 gateway와 worker를 새 이미지로 바꾼다. postgres는 그대로 둔다.
-- 두 컨테이너가 180초 안에 healthy가 되지 않으면 직전 이미지로 되돌리고 Actions 실행을 실패로 끝낸다. 결과는 팀 채널에 한 줄로 알린다.
+- 두 컨테이너가 180초 안에 healthy가 되지 않으면 직전 이미지로 되돌리고 Actions 실행을 실패로 끝낸다.
+- 배포 결과는 Slack에 알리지 않는다. GitHub Actions의 deploy 실행 결과와 로그로 확인한다.
 - worker는 종료 신호를 받으면 실행 중인 작업을 최대 4분 동안 마무리한다.
 - 인프라(EC2, ECR, IAM 역할, `rin-ai` 사용자)는 `deploy/aws/`의 Terraform으로 관리한다. state는 `hopcharlie-tfstate-525091405886-apne2` 버킷의 `rin/terraform.tfstate`에 있다.
 

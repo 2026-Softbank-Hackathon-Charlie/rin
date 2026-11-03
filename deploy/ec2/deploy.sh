@@ -11,7 +11,6 @@ image="${1:?usage: deploy.sh <image>}"
 region=ap-northeast-2
 dir=/srv/rin
 env_file=/run/rin.env
-channel=C0CCZ9RJ52T # #final_team_charlie
 health_timeout=180
 
 short() { # <image>: the first 7 characters of its tag
@@ -63,23 +62,10 @@ deploy() { # <image>
   compose "$1" up -d && wait_healthy "$1"
 }
 
+# The result goes only to the SSM command output, which the workflow prints.
+# There is no Slack notice: the team checks the Actions run.
 notify() { # <text>
-  local token resp
-  token="$(sed -n 's/^SLACK_BOT_TOKEN=//p' "$env_file")"
-  if [ -z "$token" ]; then
-    echo "SLACK_BOT_TOKEN is not set, skipping the Slack message: $1" >&2
-    return 0
-  fi
-  # The token goes to curl on stdin (-K -), not on the command line.
-  resp="$(printf 'header = "Authorization: Bearer %s"\n' "$token" |
-    curl -sS --max-time 10 -K - \
-      -H 'Content-Type: application/json; charset=utf-8' \
-      --data "{\"channel\":\"$channel\",\"text\":\"$1\"}" \
-      https://slack.com/api/chat.postMessage || true)"
-  case "$resp" in
-    *'"ok":true'*) ;;
-    *) echo "Slack message failed: $resp" >&2 ;;
-  esac
+  echo "result: $1" >&2
 }
 
 prev="$(cat "$dir/current-image" 2>/dev/null || true)"
