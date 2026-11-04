@@ -4,7 +4,7 @@ import { aiAwsEnv, config, displayName, need } from '../config.js';
 import { getSetting, sql, type Job, type ScheduleRow, type ThreadRow } from '../db/index.js';
 import { readerEnv } from '../db/reader.js';
 import { botIdentity, installationToken } from '../github/app.js';
-import { asksForDelete, asksForMerge } from '../agent/guards.js';
+import { asksForMerge, type BashContext } from '../agent/guards.js';
 import { logLines } from '../agent/logfmt.js';
 import { buildOptions } from '../agent/options.js';
 import { rinToolServer } from '../agent/tools.js';
@@ -82,8 +82,7 @@ async function execute(p: {
   resume?: string;
   /** The Slack thread the answer goes to; files can be uploaded there. Absent for scheduled runs. */
   thread?: { channel: string; ts: string };
-  mergeAllowed: boolean;
-  deleteAllowed: boolean;
+  guard: BashContext;
   env: Record<string, string>;
   onSession: (sessionId: string) => Promise<void>;
   onLog?: (lines: string[], toolCalls: number) => void;
@@ -97,8 +96,7 @@ async function execute(p: {
         model: p.model,
         resume: p.resume,
         abortController: p.deps.handle.controller,
-        mergeAllowed: p.mergeAllowed,
-        deleteAllowed: p.deleteAllowed,
+        guard: p.guard,
         env: p.env,
         mcpServers: {
           rin: rinToolServer({
@@ -171,8 +169,7 @@ async function runSlackJob(job: Job, deps: Deps): Promise<void> {
       model,
       resume,
       thread: { channel: job.channel, ts: threadTs },
-      mergeAllowed: asksForMerge(job.prompt),
-      deleteAllowed: asksForDelete(job.prompt),
+      guard: { mergeAllowed: asksForMerge(job.prompt), request: job.prompt, scheduled: false },
       env,
       prompt: buildPrompt({
         messages,
@@ -270,8 +267,8 @@ async function runScheduleJob(job: Job, deps: Deps): Promise<void> {
     deps,
     job,
     model,
-    mergeAllowed: false,
-    deleteAllowed: false,
+    // Nobody asked for a scheduled run just now: no merge, no deletion, and charlie only reads.
+    guard: { mergeAllowed: false, request: '', scheduled: true },
     env,
     prompt: buildSchedulePrompt({ id: job.schedule_id ?? 0, title, prompt: job.prompt, createdBy: job.requester ?? '', announce }),
     onSession: async () => {},

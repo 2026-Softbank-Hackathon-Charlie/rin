@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { HookCallback, HookJSONOutput, Options } from '@anthropic-ai/claude-agent-sdk';
 import { appRoot, config, need } from '../config.js';
-import { checkBash, checkWritePath, type Verdict } from './guards.js';
+import { checkBash, checkWritePath, type BashContext, type Verdict } from './guards.js';
 
 /** Tools that make no sense without a human at a terminal, or that only live as long as the session. */
 const DISALLOWED_TOOLS = [
@@ -23,9 +23,9 @@ const PASS_THROUGH = [
   'PATH', 'HOME', 'USERPROFILE', 'SystemRoot', 'SYSTEMROOT', 'PATHEXT', 'ComSpec', 'TEMP', 'TMP', 'APPDATA', 'LOCALAPPDATA', 'LANG',
   // mermaid-cli (mmdc) finds the image's Chromium through this.
   'PUPPETEER_EXECUTABLE_PATH',
-  // Tools, caches and tool settings (such as the charlie login) under /data/tools (Dockerfile).
+  // Tools, caches and the charlie login under /data/tools (Dockerfile).
   'MISE_DATA_DIR', 'MISE_GLOBAL_CONFIG_FILE', 'MISE_TRUSTED_CONFIG_PATHS', 'MISE_YES', 'GOPATH', 'XDG_CACHE_HOME', 'npm_config_cache',
-  'XDG_CONFIG_HOME',
+  'CHARLIE_CONFIG_DIR',
   // go install of the team's private modules (the charlie CLI) through git and the installation token.
   'GOPRIVATE',
 ];
@@ -66,8 +66,8 @@ export function buildOptions(p: {
   model: string;
   resume?: string;
   abortController: AbortController;
-  mergeAllowed: boolean;
-  deleteAllowed: boolean;
+  /** The Bash policy context: merge request, request text and whether this is a scheduled run. */
+  guard: BashContext;
   /** Extra variables for the Claude process: GitHub token, git identity, view-only AWS keys. */
   env?: Record<string, string>;
   mcpServers?: Options['mcpServers'];
@@ -78,9 +78,7 @@ export function buildOptions(p: {
   const bashHook: HookCallback = async (input) => {
     if (input.hook_event_name !== 'PreToolUse') return {};
     const command = (input.tool_input as { command?: unknown } | null)?.command;
-    return toHookOutput(
-      checkBash(typeof command === 'string' ? command : '', { mergeAllowed: p.mergeAllowed, deleteAllowed: p.deleteAllowed }),
-    );
+    return toHookOutput(checkBash(typeof command === 'string' ? command : '', p.guard));
   };
   const writeHook: HookCallback = async (input) => {
     if (input.hook_event_name !== 'PreToolUse') return {};
