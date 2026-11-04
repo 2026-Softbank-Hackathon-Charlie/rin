@@ -36,6 +36,10 @@ RUN apt-get update \
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 # mise installs toolchains (Go, Python, Java, kubectl, ...) without root. They and the Go, npm and pip caches live
 # under /data/tools, which is on the host, so what Claude installs once stays across runs and deploys.
+# The charlie CLI keeps its login in CHARLIE_CONFIG_DIR, so a login made in one run is used by the next. Only charlie
+# reads it. Other tools keep their settings under $HOME, outside the shared /data, so a sandbox cannot plant a git
+# config that the worker would read.
+# GOPRIVATE lets go install fetch the team's private modules (the charlie CLI) through git with $GH_TOKEN.
 RUN curl -fsSL -o /usr/local/bin/mise https://github.com/jdx/mise/releases/download/v2026.10.25/mise-v2026.10.25-linux-x64 \
  && echo "5d362ecc578dc7c146679b841dda949d6472cbf86ff5635db7afdca1b6b3fd87  /usr/local/bin/mise" | sha256sum -c - \
  && chmod 755 /usr/local/bin/mise
@@ -45,6 +49,8 @@ ENV MISE_DATA_DIR=/data/tools/mise \
     MISE_YES=1 \
     GOPATH=/data/tools/go \
     XDG_CACHE_HOME=/data/tools/cache \
+    CHARLIE_CONFIG_DIR=/data/tools/charlie \
+    GOPRIVATE=github.com/2026-Softbank-Hackathon-Charlie \
     npm_config_cache=/data/tools/cache/npm \
     PATH=/data/tools/mise/shims:/data/tools/go/bin:$PATH
 WORKDIR /app
