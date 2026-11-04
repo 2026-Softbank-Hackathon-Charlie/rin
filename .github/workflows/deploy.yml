@@ -23,7 +23,7 @@ defaults:
 
 jobs:
   deploy:
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, hopcharlie]
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
@@ -33,6 +33,10 @@ jobs:
         with:
           role-to-assume: ${{ vars.RIN_DEPLOY_ROLE_ARN }}
           aws-region: ap-northeast-2
+
+      # Self-hosted runners keep ~/.docker between jobs: log in to ECR in this job's temp dir.
+      - name: Job-private Docker config
+        run: echo "DOCKER_CONFIG=$RUNNER_TEMP/docker" >> "$GITHUB_ENV"
 
       - id: ecr
         uses: aws-actions/amazon-ecr-login@v2
