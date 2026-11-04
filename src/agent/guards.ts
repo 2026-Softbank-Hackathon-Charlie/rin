@@ -30,26 +30,27 @@ function segments(command: string): string[] {
 
 /**
  * Prefixes that run the command after them, each with its flags: subshells and substitutions, shell keywords,
- * assignments, and wrappers such as sudo, env, timeout, xargs, mise exec and bash -c '...'.
+ * assignments, and wrappers such as sudo, env, timeout, xargs, mise exec and bash -c '...'. A flag value never
+ * starts with -, which also keeps these regexes from backtracking on input like "sudo -u -u -u ...".
  */
 const PREFIXES = [
   /^(?:\(|\{\s|\$\(|`)\s*/,
   /^(?:if|elif|then|else|do|while|until|export|local|!)\s+/,
   /^\w+=["']?(?=\$\(|`)/,
   /^\w+=(?:"[^"]*"|'[^']*'|[^\s"'])*\s+/,
-  /^sudo(?:\s+-[ugUCDhprtT]\s+\S+|\s+-\S+)*\s+/,
-  /^env(?:\s+-[uC]\s+\S+|\s+-\S+)*\s+/,
+  /^sudo(?:\s+-[ugUCDhprtT]\s+[^\s-]\S*|\s+-\S+)*\s+/,
+  /^env(?:\s+-[uC]\s+[^\s-]\S*|\s+-\S+)*\s+/,
   /^(?:nohup|time|command|exec)(?:\s+-\S+)*\s+/,
-  /^timeout(?:\s+-[sk]\s+\S+|\s+-\S+)*\s+\S+\s+/,
-  /^nice(?:\s+-n\s+\S+|\s+-\S+)*\s+/,
-  /^xargs(?:\s+-[nIPLsdaE]\s+\S+|\s+-\S+)*\s+/,
+  /^timeout(?:\s+-[sk]\s+[^\s-]\S*|\s+-\S+)*\s+\S+\s+/,
+  /^nice(?:\s+-n\s+[^\s-]\S*|\s+-\S+)*\s+/,
+  /^xargs(?:\s+-[nIPLsdaE]\s+[^\s-]\S*|\s+-\S+)*\s+/,
   /^mise\s+(?:exec|x)\b.*?\s--\s+/,
   /^(?:\S*\/)?(?:ba|z|da)?sh\s+(?:-[-\w]+\s+)*?-\w*c\w*\s+['"]?/,
   /^eval\s+['"]?/,
 ];
 
 /** go run of the charlie main package, e.g. go run ./cmd/charlie or go run .../cli/cmd/charlie@latest. */
-const GO_RUN_CHARLIE = /^go\s+run(?:\s+-(?:C|tags)\s+\S+|\s+-\S+)*\s+(?:\S*\/)?charlie\/?(?:@\S*)?(?=\s|$)/;
+const GO_RUN_CHARLIE = /^go\s+run(?:\s+-(?:C|tags)\s+[^\s-]\S*|\s+-\S+)*\s+(?:\S*\/)?charlie\/?(?:@\S*)?(?=\s|$)/;
 
 /** The command a segment runs once the prefixes above are removed; go run of charlie reads as charlie. */
 function commandOf(seg: string): string {
@@ -78,7 +79,7 @@ export function asksToDelete(text: string, target: string): boolean {
  * stay whole ("switch failed"); quotes and the ) } ` that segmenting leaves behind are dropped.
  */
 function charlieArgs(cmd: string): string[] | undefined {
-  const m = /^['"]?(?:\S*\/)?charlie['"]?(?:\s+(.*))?$/.exec(cmd);
+  const m = /^['"\\]?(?:\S*\/)?charlie['"]?(?:\s+(.*))?$/.exec(cmd);
   if (!m) return undefined;
   return (m[1]?.match(/(?:"[^"]*"|'[^']*'|[^\s"'])+/g) ?? []).map((w) => w.replace(/^["']+|["'`)}]+$/g, '')).filter(Boolean);
 }

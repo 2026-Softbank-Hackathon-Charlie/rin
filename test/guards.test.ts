@@ -134,8 +134,15 @@ test('charlie guard sees through continuations, loops, wrappers, background jobs
     'out="$(charlie plan approve x)"',
     'export OUT=`charlie plan approve x`',
     '`charlie plan approve x`',
+    String.raw`\charlie plan approve x`,
   ];
   for (const cmd of denied) assert.equal(allowed(cmd, anything), false, cmd);
+});
+
+test('long flag lists do not make the wrapper regexes backtrack', () => {
+  // Each of these took seconds and grew exponentially when a flag value could start with -.
+  assert.equal(allowed(`go run ${'-C '.repeat(40)}x`), true);
+  assert.equal(allowed(`sudo ${'-u '.repeat(40)}x`), true);
 });
 
 test('charlie mentioned outside command position is fine', () => {
