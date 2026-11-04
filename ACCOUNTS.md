@@ -18,6 +18,7 @@ Rin이 외부 서비스에 접근할 때 쓰는 신원을 모두 여기에 적�
 | GitHub | App charlie-rin(App ID 5581776), 조직의 모든 레포에 설치 | contents, pull_requests, actions, checks, statuses, workflows, issues, secrets, actions variables, organization projects 쓰기, metadata, members 읽기 | `GITHUB_APP_ID`, `GITHUB_APP_INSTALLATION_ID`, `GITHUB_APP_PRIVATE_KEY_B64` | 1시간짜리 설치 토큰만 `GH_TOKEN`으로 준다 | 없음(설치 토큰은 1시간) | 조직 설정에서 설치 해제, 앱 삭제 |
 | AWS | IAM 사용자 `rin-ai` | ViewOnlyAccess, 비밀값 읽기는 명시적으로 거부 | `RIN_AI_AWS_ACCESS_KEY_ID`, `RIN_AI_AWS_SECRET_ACCESS_KEY` | 환경 변수로 준다 | 없음 | `deploy/aws` Terraform에서 사용자와 키 제거 |
 | Notion | 조서현 계정의 OAuth(hosted Notion MCP) | 조서현이 볼 수 있는 페이지 전부. 삭제와 이동 도구는 막았다 | 없음. EC2 `/srv/rin/data/claude`에 있다 | Claude Code가 직접 쓴다. 샌드박스에 마운트되는 폴더라 Claude가 읽을 수 있다 | 갱신이 실패하면 다시 로그인 | Notion 설정의 연결된 앱에서 해제 |
+| HopCharlie 플랫폼 | `charlie login`의 device code를 관리자가 콘솔(`console.hopcharlie.dev/#device`)에서 승인해 발급된 CLI 토큰 | 승인한 관리자의 이름과 operator 권한. guard가 Plan 승인, 거절, 전환 승인(`migrate switch`), `--auto-switch`를 막고, 앱과 인스턴스 삭제는 요청자가 삭제를 명시했을 때만 허용한다 | 없음. `/data/tools/config/charlie/config.json`(0600)에 있다 | Claude가 직접 쓴다. 샌드박스에 마운트되는 폴더라 Claude가 읽을 수 있다 | 30일 | Rin에게 `charlie logout`을 시킨다. 파일만 지우면 서버의 토큰은 만료될 때까지 남는다 |
 | Cloudflare | 팀 Cloudflare 계정에서 만든 user token | `hopcharlie.dev` zone의 Zone, DNS, SSL and Certificates, Analytics 읽기, 계정의 Account Settings, Cloudflare Tunnel 읽기 | `CLOUDFLARE_API_TOKEN` | 주지 않는다. Rin 도구로만 쓴다 | 2026-11-09 23:59 KST | Cloudflare My Profile > API Tokens에서 삭제 |
 
 ## 내부 비밀값

@@ -4,7 +4,7 @@ import { aiAwsEnv, config, displayName, need } from '../config.js';
 import { getSetting, sql, type Job, type ScheduleRow, type ThreadRow } from '../db/index.js';
 import { readerEnv } from '../db/reader.js';
 import { botIdentity, installationToken } from '../github/app.js';
-import { asksForMerge } from '../agent/guards.js';
+import { asksForDelete, asksForMerge } from '../agent/guards.js';
 import { logLines } from '../agent/logfmt.js';
 import { buildOptions } from '../agent/options.js';
 import { rinToolServer } from '../agent/tools.js';
@@ -83,6 +83,7 @@ async function execute(p: {
   /** The Slack thread the answer goes to; files can be uploaded there. Absent for scheduled runs. */
   thread?: { channel: string; ts: string };
   mergeAllowed: boolean;
+  deleteAllowed: boolean;
   env: Record<string, string>;
   onSession: (sessionId: string) => Promise<void>;
   onLog?: (lines: string[], toolCalls: number) => void;
@@ -97,6 +98,7 @@ async function execute(p: {
         resume: p.resume,
         abortController: p.deps.handle.controller,
         mergeAllowed: p.mergeAllowed,
+        deleteAllowed: p.deleteAllowed,
         env: p.env,
         mcpServers: {
           rin: rinToolServer({
@@ -170,6 +172,7 @@ async function runSlackJob(job: Job, deps: Deps): Promise<void> {
       resume,
       thread: { channel: job.channel, ts: threadTs },
       mergeAllowed: asksForMerge(job.prompt),
+      deleteAllowed: asksForDelete(job.prompt),
       env,
       prompt: buildPrompt({
         messages,
@@ -268,6 +271,7 @@ async function runScheduleJob(job: Job, deps: Deps): Promise<void> {
     job,
     model,
     mergeAllowed: false,
+    deleteAllowed: false,
     env,
     prompt: buildSchedulePrompt({ id: job.schedule_id ?? 0, title, prompt: job.prompt, createdBy: job.requester ?? '', announce }),
     onSession: async () => {},

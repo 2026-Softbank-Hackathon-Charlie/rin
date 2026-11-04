@@ -18,14 +18,31 @@ export function asksForMerge(text: string | null | undefined): boolean {
   return !!text && /머지|merge/i.test(text);
 }
 
+/** True when a request text explicitly asks to delete something. */
+export function asksForDelete(text: string | null | undefined): boolean {
+  return !!text && /삭제|지워|지우|제거|delete|remove/i.test(text);
+}
+
+/**
+ * The subcommand words of a charlie (HopCharlie CLI) call without flags, e.g. "plan approve pln_1", or undefined
+ * when the command is not charlie. Leading VAR=value assignments and a path to the binary are allowed.
+ */
+function charlieArgs(words: string): string | undefined {
+  const m = /^(?:\w+=\S*\s+)*(?:\S*\/)?charlie(?:\s+(.*))?$/.exec(words);
+  if (!m) return undefined;
+  return (m[1] ?? '').split(/\s+/).filter((w) => w && !w.startsWith('-')).join(' ');
+}
+
 /**
  * Policy for the Bash tool.
  * - git push only to an explicit rin/ branch, never forced
  * - gh pr merge only when the requester asked for a merge
  * - no repo deletion, no DELETE through gh api
  * - no kubectl, terraform, helm
+ * - charlie: never approve or reject a plan, approve a switch or start with --auto-switch (a person approves);
+ *   app rm and app branch rm only when the requester asked for a deletion
  */
-export function checkBash(command: string, ctx: { mergeAllowed: boolean }): Verdict {
+export function checkBash(command: string, ctx: { mergeAllowed: boolean; deleteAllowed: boolean }): Verdict {
   for (const seg of segments(command)) {
     const words = seg.replace(/^(sudo|env\s+\S+=\S+)\s+/, '');
 
@@ -50,6 +67,19 @@ export function checkBash(command: string, ctx: { mergeAllowed: boolean }): Verd
 
     if (/^gh\s+pr\s+merge\b/.test(words) || (/^gh\s+api\b/.test(words) && /\/merge\b/.test(words))) {
       if (!ctx.mergeAllowed) return deny('요청자가 머지를 명시적으로 요청하지 않았다. PR까지만 열고 머지는 요청을 기다린다.');
+    }
+
+    const charlie = charlieArgs(words);
+    if (charlie !== undefined) {
+      if (/\bplan (approve|reject)\b/.test(charlie) || /\bmigrate switch\b/.test(charlie)) {
+        return deny('Plan 승인, 거절과 전환 승인은 사람이 콘솔이나 자기 CLI로 한다. AI는 승인하지 않는다.');
+      }
+      if (/\bmigrate start\b/.test(charlie) && /\s--auto-switch\b/.test(words)) {
+        return deny('--auto-switch는 사람의 전환 승인을 건너뛰므로 쓰지 않는다. 전환은 사람이 승인한다.');
+      }
+      if (/\bapp (rm|branch rm)\b/.test(charlie) && !ctx.deleteAllowed) {
+        return deny('요청자가 삭제를 명시적으로 요청하지 않았다. 앱과 인스턴스 삭제는 데이터까지 지우므로 요청을 기다린다.');
+      }
     }
 
     if (/^gh\s+repo\s+delete\b/.test(words)) return deny('레포 삭제는 허용하지 않는다.');

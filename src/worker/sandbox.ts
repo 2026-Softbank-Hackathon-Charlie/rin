@@ -33,6 +33,9 @@ export function sandboxArgs(p: {
   return [
     'run', '--rm', '-i', '--init',
     '--name', p.name,
+    // The hostname is what tools report about this machine, e.g. "charlie v0.5.0 on rin-sbx-7-a1b2c3" on the
+    // console's CLI login approval page, so an approver can tell a Rin run from a container id.
+    '--hostname', p.name,
     '--label', `${LABEL}=${p.jobId}`,
     '--network', p.cfg.network,
     '--memory', MEMORY,

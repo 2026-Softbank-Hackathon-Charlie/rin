@@ -33,6 +33,10 @@ test('no Docker socket, no privileges, removed on exit, labelled with the job', 
   assert.deepEqual(values('--network'), ['rin_default']);
 });
 
+test('the hostname is the sandbox name, so tools that report it name the Rin run', () => {
+  assert.deepEqual(values('--hostname'), ['rin-sbx-7-a1b2c3']);
+});
+
 test('the image comes right before the Claude Code command and its arguments', () => {
   const at = args.indexOf('registry/hopcharlie/rin:abc');
   assert.deepEqual(args.slice(at), [
