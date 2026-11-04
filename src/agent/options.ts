@@ -102,7 +102,8 @@ export function buildOptions(p: {
     disallowedTools: DISALLOWED_TOOLS,
     hooks: {
       PreToolUse: [
-        { matcher: 'Bash', hooks: [bashHook] },
+        // Monitor runs a shell command too (tool_input.command).
+        { matcher: 'Bash|Monitor', hooks: [bashHook] },
         { matcher: 'Edit|Write|MultiEdit|NotebookEdit', hooks: [writeHook] },
       ],
     },

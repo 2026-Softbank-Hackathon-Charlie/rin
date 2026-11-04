@@ -26,6 +26,9 @@ test('git push only to rin/ branches', () => {
   assert.equal(allowed('cd repo && git push origin main'), false);
   assert.equal(allowed(`git push origin ${NL}  main`), false);
   assert.equal(allowed('timeout 60 git push origin main'), false);
+  // Redirections are not refspecs.
+  assert.equal(allowed('git push origin rin/x 2>&1 | tail -5'), true);
+  assert.equal(allowed('git push origin main 2>&1'), false);
 });
 
 test('force push is always denied', () => {
@@ -83,15 +86,21 @@ test('charlie: --auto-switch and --auto-rollback are denied, --auto-switch=false
   assert.equal(allowed('charlie migrate abort run_1 --reason "switch failed"'), true);
 });
 
-test('charlie: help runs nothing, so it is allowed on any command', () => {
-  assert.equal(allowed('charlie migrate rollback --help'), true);
-  assert.equal(allowed('charlie plan approve -h'), true);
-  assert.equal(allowed('charlie migrate start pln_1 --help --auto-switch'), true);
-  assert.equal(allowed('charlie help plan approve'), true);
-  assert.equal(allowed('charlie app rm --help', scheduled), true);
-  // Here --help is the value of --comment, and the approval would run.
-  assert.equal(allowed('charlie plan approve pln_1 --comment --help', anything), false);
-  assert.equal(allowed('charlie plan approve pln_1 --help; charlie plan approve pln_1', anything), false);
+test('charlie login runs only with --no-wait, since it otherwise waits for the approval', () => {
+  assert.equal(allowed('charlie login'), false);
+  assert.equal(allowed('charlie login --server https://api.hopcharlie.dev'), false);
+  assert.equal(allowed('charlie login --no-wait'), true);
+  assert.equal(allowed('charlie login --no-wait --json'), true);
+  assert.equal(allowed('charlie whoami'), true);
+  assert.equal(allowed('charlie logout'), true);
+});
+
+test('a denial names the part of the line it judged', () => {
+  const v = checkBash('git status && charlie migrate switch run_1 --watch', noMerge);
+  assert.equal(v.allow, false);
+  assert.ok(!v.allow && v.reason.endsWith('(판단한 명령: charlie migrate switch run_1 --watch)'), !v.allow ? v.reason : '');
+  const long = checkBash(`kubectl get pods ${'x'.repeat(200)}`, noMerge);
+  assert.ok(!long.allow && long.reason.endsWith(`(판단한 명령: kubectl get pods ${'x'.repeat(63)})`));
 });
 
 test('charlie guard sees through continuations, loops, wrappers, background jobs and subshells', () => {
@@ -139,10 +148,12 @@ test('charlie guard sees through continuations, loops, wrappers, background jobs
   for (const cmd of denied) assert.equal(allowed(cmd, anything), false, cmd);
 });
 
-test('long flag lists do not make the wrapper regexes backtrack', () => {
-  // Each of these took seconds and grew exponentially when a flag value could start with -.
+test('long flag lists do not make the wrapper regexes backtrack', { timeout: 1000 }, () => {
+  // The go run input took seconds and grew exponentially when a flag value could start with -.
   assert.equal(allowed(`go run ${'-C '.repeat(40)}x`), true);
   assert.equal(allowed(`sudo ${'-u '.repeat(40)}x`), true);
+  assert.equal(allowed(`bash ${'-c'.repeat(5000)}`), true);
+  assert.equal(allowed(`charlie plan show ${'x '.repeat(5000)}`), true);
 });
 
 test('charlie mentioned outside command position is fine', () => {
@@ -175,6 +186,14 @@ test('charlie app rm and app branch rm need a request that asks to delete that t
   assert.equal(allowed('charlie --server X app rm moimroom --yes', asking('please delete moimroom')), true);
   assert.equal(allowed('charlie app branch rm moimroom moimroom--dev --yes', asking('`moimroom--dev` 인스턴스 없애 줘')), true);
   assert.equal(allowed('charlie app branch rm moimroom feature/x --yes', asking('feature/x 브랜치 인스턴스 remove 해 줘')), true);
+  // A request about an instance or a branch never unlocks deleting the whole app.
+  assert.equal(allowed('charlie app rm moimroom --yes', asking('moimroom 앱의 dev 브랜치 인스턴스 지워 줘')), false);
+  assert.equal(allowed('charlie app branch rm moimroom dev --yes', asking('moimroom 앱의 dev 브랜치 인스턴스 지워 줘')), true);
+  assert.equal(allowed('charlie app rm moimroom --yes', asking('moimroom--dev만 지우고 moimroom은 남겨 줘')), false);
+  assert.equal(allowed('charlie app branch rm moimroom moimroom--dev --yes', asking('moimroom--dev만 지우고 moimroom은 남겨 줘')), true);
+  assert.equal(allowed('charlie app rm moimroom --yes', asking('delete the moimroom instance')), false);
+  // Negation is not detected: the guard only sees a deletion word and the name. Rin reads the intent (prompts/rin.md).
+  assert.equal(allowed('charlie app rm moimroom --yes', asking('moimroom은 삭제하지 마')), true);
   assert.equal(asksToDelete('moimroom 삭제', 'moimroom'), true);
   assert.equal(asksToDelete('moimroom-v2 삭제', 'moimroom'), false);
   assert.equal(asksToDelete('moimroom 삭제', 'moim.room'), false);

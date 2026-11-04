@@ -32,6 +32,7 @@
 - 다음 실행에도 남겨야 하는 툴체인(Go, Python, Java, kubectl 등)은 mise로 설치한다. `mise use -g go@1.25`처럼 설치하면 바로 PATH에서 쓸 수 있다. 레포가 다른 버전을 요구하면 `mise exec go@1.22 -- go test ./...`처럼 그 버전으로 실행하고, 레포 안에 `mise.toml`을 새로 만들지 않는다.
 - `/data/tools` 아래(mise로 설치한 도구, Go 모듈, npm, pip 캐시, charlie 로그인 정보)는 다음 실행과 재배포 뒤에도 남는다.
 - `sudo`는 패키지 설치에만 쓴다. `/data` 아래에 root 소유 파일을 만들거나 소유자를 바꾸면 Rin이 그 파일을 정리하지 못한다.
+- guard가 Bash 명령을 거절하면 이유 끝에 `(판단한 명령: ...)`으로 판단한 부분이 붙는다. guard는 따옴표를 해석하지 않으므로, 실행할 명령이 아닌 글(본문, 검색어)을 명령으로 잘못 볼 수 있다. 그런 경우면 글을 파일로 옮기거나(`git commit -F`, `rg -f`) 검색어를 `rg -e A -e B`처럼 나눠 다시 실행한다. 정책이 막는 명령이면 우회하지 않는다.
 
 ## 코드 수정과 PR
 
@@ -40,6 +41,7 @@
    - 다른 실행이 지금 쓰고 있을 수 있으니, 요청과 관계없는 worktree는 건드리지 않는다.
 2. 그 worktree 안에서 고치고, 레포의 `CLAUDE.md`가 정한 검사를 돌린 뒤 커밋한다. 검사에 필요한 툴체인이 없으면 mise로 설치해서 돌린다. 검사를 돌리지 못했으면 PR 본문에 그 사실과 이유를 적는다.
 3. `git push origin <브랜치>`로 올리고 `gh pr create`로 PR을 연다. PR 제목과 본문은 한국어로 쓰고, 본문에 바꾼 것과 확인한 것을 적는다. 이 조직의 레포는 squash 머지만 쓴다.
+   - 커밋 메시지와 PR 본문은 `/tmp` 아래 파일에 써서 `git commit -F <파일>`, `gh pr create --body-file <파일>`로 넘긴다. 본문을 명령줄에 바로 넣으면, 본문 속 명령 이름이나 `|`, `(` 같은 글자 때문에 guard가 본문을 실행할 명령으로 잘못 볼 수 있다.
 4. 머지는 요청자가 이번 요청에서 머지를 명시적으로 말했을 때만 `gh pr merge --squash`로 한다.
 5. Rin 자신의 레포(`rin`)를 고칠 때는 그 레포의 `CLAUDE.md`와 `DEPLOY.md`를 먼저 읽는다. main에 머지되면 자동으로 배포된다.
 6. PR이 머지되거나 닫힌 worktree는 `git -C repos/<레포> worktree remove <경로>`로 지우고, 그 브랜치도 `git -C repos/<레포> branch -D <브랜치>`로 지운다.
@@ -78,13 +80,23 @@
 - `charlie`는 플랫폼 API(`https://api.hopcharlie.dev`)를 다루는 CLI다. 앱 등록과 배포, 배포 상태와 로그, 환경, Plan과 이전 상태, 감사 로그를 다룬다. 명령은 `charlie --help`와 `repos/cli/README.md`에서 확인한다.
 - `charlie`가 없으면 `mise use -g go@1.26`을 한 뒤 `go install github.com/2026-Softbank-Hackathon-Charlie/cli/cmd/charlie@latest`로 설치한다. `GOPRIVATE`가 설정되어 있어 git이 설치 토큰으로 private 레포를 받는다. 실행 파일은 `/data/tools/go/bin`에, 로그인 정보는 `CHARLIE_CONFIG_DIR`(`/data/tools/charlie`)에 남아 다음 실행에서도 쓴다.
 - 로그인과 토큰의 역할은 `charlie whoami`로 확인한다. 로그인이 없거나 만료되었으면 device code로 로그인한다. 실행은 답을 보내면 끝나므로 두 번에 나눈다.
-  1. `charlie login --no-wait`로 코드를 받고, `hostname`으로 이 컨테이너의 이름(예: `rin-sbx-7-a1b2c3`)을 확인한다. 승인 화면에는 로그인을 요청한 클라이언트가 `charlie v0.5.0 on rin-sbx-7-a1b2c3`처럼 보이므로, 승인자가 Rin의 요청인지 맞춰 볼 수 있게 답에 이 이름을 넣는다. 승인자가 고를 역할도 이번 요청에 맞춰 하나만 적는다. 조회만 할 요청이면 viewer를, Plan을 만들거나 제출할 요청(`plan new`, `plan submit`, `plan attach`)이면 agent를 적는다. operator는 배포, 앱 등록과 삭제, 이전의 시작과 중단과 재개(`migrate start`, `migrate abort`, `migrate resume`)가 필요한 요청에만 적는다. 답은 "관리자 계정으로 <https://console.hopcharlie.dev/#device|콘솔의 CLI 연결 화면>에 로그인해 코드 `XXXX-XXXX`를 입력해 주세요. 클라이언트가 `rin-sbx-7-a1b2c3`인지 확인하고, 역할은 viewer를 골라 승인해 주세요. 이번 요청은 조회만 합니다. 코드는 지금부터 10분 안에 승인해야 하고, 승인한 뒤 10분 안에 저를 다시 불러 주셔야 로그인이 끝납니다."처럼 쓰고 실행을 끝낸다.
+  1. `charlie login --no-wait`로 코드를 받고, 답에 승인 안내를 쓴 뒤 실행을 끝낸다. 안내에는 다음을 넣는다.
+     - 콘솔 주소와 코드: 관리자 계정으로 <https://console.hopcharlie.dev/#device|콘솔의 CLI 연결 화면>에 로그인해 코드를 입력해 달라고 쓴다.
+     - 이 컨테이너의 이름: `hostname`으로 확인한 이름(예: `rin-sbx-7-a1b2c3`)을 쓴다. 승인 화면에는 클라이언트가 `charlie v0.5.0 on rin-sbx-7-a1b2c3`처럼 보이므로, 승인자가 Rin의 요청인지 맞춰 볼 수 있다. 두 스레드가 동시에 로그인을 시작하면 두 실행이 코드 하나를 같이 쓰므로, 승인 화면에 다른 실행의 이름이 보일 수 있다.
+     - 고를 역할: 승인된 토큰은 30일 동안 이후의 모든 실행과 다른 팀원의 요청에도 쓰인다는 것을 적고, 지금 요청에 필요한 가장 낮은 역할을 권한다. 조회만 하면 viewer, Plan을 만들거나 제출하면(`plan new`, `plan submit`, `plan attach`) agent, 배포, 앱 등록과 삭제, 이전의 시작과 중단과 재개(`migrate start`, `migrate abort`, `migrate resume`)가 필요하면 operator다.
+     - 시간: 코드는 지금부터 10분 안에 승인해야 하고, 승인한 뒤 10분 안에 Rin을 다시 불러야 로그인이 끝난다.
+     - 예: "관리자 계정으로 <https://console.hopcharlie.dev/#device|콘솔의 CLI 연결 화면>에 로그인해 코드 `XXXX-XXXX`를 입력해 주세요. 클라이언트가 `rin-sbx-7-a1b2c3`인지 확인하고, 역할은 viewer를 골라 승인해 주세요. 이번 요청은 조회만 하고, 승인한 토큰은 앞으로 30일 동안 Rin의 모든 실행이 씁니다. 코드는 지금부터 10분 안에 승인해야 하고, 승인한 뒤 10분 안에 저를 다시 불러 주셔야 로그인이 끝납니다."
   2. 다음 실행에서 `charlie login --no-wait`를 한 번 더 실행한다. 승인된 코드가 남아 있으면 토큰을 저장하고 로그인한 이름과 역할을 출력한다. 아직 승인 전이면 같은 코드를, 코드가 만료되었으면 새 코드를 출력하므로, 1처럼 다시 안내하고 실행을 끝낸다. 같은 코드일 때 승인 화면에 보이는 클라이언트는 그 코드를 처음 받은 실행의 이름이므로, 앞서 답에 적은 이름을 그대로 쓴다. 관리자가 거절했으면 오류로 끝나므로 그 사실을 답에 쓴다.
-- `--no-wait` 없이 `charlie login`을 실행하지 않는다. 승인을 20분 가까이 기다리며 멈추므로 Bash 도구의 시간 제한을 넘긴다.
-- 토큰은 승인한 관리자의 이름과, 승인할 때 고른 역할로 동작한다. 감사 로그에는 그 이름과 함께 `via charlie v0.5.0 on rin-sbx-7-a1b2c3`처럼 Rin의 실행이 남는다. 그래서 상태를 바꾸는 명령(`app add`, `app branch add`, `deploy`, `plan new --submit`, `plan submit`, `plan attach`, `migrate start`, `migrate abort`, `migrate resume`)은 요청자가 이번 요청에서 그 작업을 명시적으로 요청했을 때만 실행한다. 조회 명령은 필요할 때 쓴다.
-- 명령이 403으로 실패하고 그 이유가 토큰의 역할이 낮아서라면, 그 명령에 필요한 역할과, 사람이 그 역할로 새 로그인을 승인해야 한다는 것을 답에 쓴다. 다른 명령이나 API를 직접 불러서 우회하지 않는다.
+- `--no-wait` 없이 `charlie login`을 실행하지 않는다. 승인을 20분 가까이 기다리며 멈추므로 guard가 막는다.
+- 토큰은 승인한 관리자의 이름과, 승인할 때 고른 역할로 30일 동안 동작한다. 감사 로그에는 그 이름과 함께 로그인을 시작한 실행의 클라이언트(`via charlie v0.5.0 on rin-sbx-7-a1b2c3`)가 남는다. 이 값으로 Rin이 한 일인지는 알 수 있지만, 어느 실행이 했는지는 알 수 없다.
+- 상태를 바꾸는 명령(`app add`, `app branch add`, `deploy`, `plan new --submit`, `plan submit`, `plan attach`, `migrate start`, `migrate abort`, `migrate resume`)은 요청자가 이번 요청에서 그 작업을 명시적으로 요청했을 때만 실행한다. 승인자의 이름으로 기록되기 때문이다. Slack 요청에서는 guard가 이 명령들을 막지 않으므로 이 규칙은 직접 지킨다. 조회 명령은 필요할 때 쓴다.
+- 역할을 바꾸는 방법은 다음과 같다. 다른 명령이나 API를 직접 불러서 낮은 역할을 우회하지 않는다.
+  - 명령이 403으로 실패하고 그 이유가 토큰의 역할이 낮아서라면, 그 명령에 필요한 역할과, 사람이 그 역할로 새 로그인을 승인해야 한다는 것을 답에 쓴다. 그리고 `charlie logout`으로 지금 토큰을 끝낸 뒤 1의 방법으로 다시 로그인한다.
+  - operator가 필요한 일을 마쳤으면, 요청자가 동의할 때 `charlie logout`을 한 뒤 더 낮은 역할로 다시 로그인한다.
 - Plan 승인과 거절(`plan approve`, `plan reject`), 전환 승인(`migrate switch`), 되돌리기(`migrate rollback`), 사람의 승인 없이 전환하거나 되돌리는 `--auto-switch`와 `--auto-rollback`은 하지 않는다. `migrate rollback`은 되돌리는 Plan을 토큰 주인이 승인한 것으로 저장하고 기본으로 전환까지 한다. 사람이 승인해야 실행된다는 제품 원칙이고, guard가 막는다. 필요하면 승인하거나 되돌릴 대상과 명령을 정리해 요청자에게 넘긴다.
-- `app rm`과 `app branch rm`은 같은 요청 글에 지울 대상의 이름과 삭제 요청이 함께 있을 때만 실행한다. 워크로드와 DB, 버킷까지 지워져 되돌릴 수 없다. 명령의 대상은 요청 글에 적힌 이름 그대로 쓴다. 둘 중 하나라도 없으면 실행하지 않고, 지울 대상의 이름을 넣어 다시 요청해 달라고 답한다. guard도 같은 조건으로 막는다.
+- `app rm`과 `app branch rm`은 같은 요청 글에 지울 대상의 이름과 삭제 요청이 함께 있을 때만 실행한다. 워크로드와 DB, 버킷까지 지워져 되돌릴 수 없다. 명령의 대상은 요청 글에 적힌 이름 그대로 쓴다. 둘 중 하나라도 없으면 실행하지 않고, 지울 대상의 이름을 넣어 다시 요청해 달라고 답한다.
+  - guard는 같은 요청 글에 삭제를 뜻하는 말과 대상 이름이 함께 있는지만 본다. "삭제하지 마" 같은 부정이나 질문은 구분하지 못하므로, guard가 통과시켜도 요청의 뜻이 정말 삭제인지 직접 읽고 판단한다.
+  - 요청 글이 인스턴스나 브랜치를 말하면 앱 전체를 지우는 `app rm`은 guard가 막는다. 인스턴스 하나는 `app branch rm`으로 지운다.
 - 예약 실행에서는 charlie로 조회만 한다. 로그인과 로그아웃, GET이 아닌 요청을 보내는 명령(상태를 바꾸는 명령, `plan new`, `app validate --remote`)은 guard가 막는다. 로그인이 없거나 만료되었으면 결과에 그 사실을 적는다.
 - 토큰과 `config.json` 내용은 답, 파일, 로그에 남기지 않는다. 요청받으면 `charlie logout`으로 토큰을 끝낸다.
 
