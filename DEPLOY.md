@@ -5,9 +5,10 @@
 ## 현재 상태
 
 - GCP Compute Engine VM `hopcharlie-rin`에서 돈다. 프로젝트는 `project-b47cdba3-db5b-42a2-9a6`, 존은 `asia-northeast3-a`(서울)이고, e2-standard-2(2 vCPU, 8GiB)에 40GiB pd-balanced 디스크를 쓴다. VM에는 runtime service account를 붙이지 않았고, 접속은 IAP로만 한다.
+- VM, IAP 방화벽, GitHub용 Workload Identity Federation과 배포 서비스 계정, `rin-deploy` 역할에 더한 inline policy `rin-gcp-deploy-read`(SSM `/rin` 읽기, KMS 복호화)는 infra 레포의 `terraform/environments/gcp/dev/rin`이 관리한다([infra#92](https://github.com/2026-Softbank-Hackathon-Charlie/infra/pull/92)).
 - 2026-11-06에 AWS EC2 `i-05d4ba044ec963ed0`에서 옮겨 왔다. 이전 절차와 검증 결과는 [infra#86](https://github.com/2026-Softbank-Hackathon-Charlie/infra/issues/86)에 있다. 옛 EC2는 종료했고, 이전 직후에 만든 원본 디스크 스냅샷 `snap-020c500e21c7a614d`만 남아 있다.
 - 레포 변수 `RIN_DEPLOY_TARGET`이 `gcp`라서 main 배포는 GCP VM으로 간다. GCP 쪽 레포 변수와 전환 절차는 [deploy/gcp/README.md](deploy/gcp/README.md)에 있다.
-- 이미지, 비밀값, CI 역할은 AWS에 그대로 둔다. ECR `hopcharlie/rin`, SSM 서울 `/rin/*`, IAM 역할 `rin-deploy`, IAM 사용자 `rin-ai`는 GCP 배포와 Rin이 계속 쓰므로 지우지 않는다. 이 리소스는 `deploy/aws/`의 Terraform이 관리한다.
+- 이미지, 비밀값, CI 역할은 AWS에 그대로 둔다. ECR `hopcharlie/rin`, SSM 서울 `/rin/*`, IAM 역할 `rin-deploy`, IAM 사용자 `rin-ai`는 GCP 배포와 Rin이 계속 쓰므로 지우지 않는다. 이 리소스는 `rin-gcp-deploy-read`를 빼고 `deploy/aws/`의 Terraform이 관리한다.
 - `deploy/aws/main.tf`에는 종료한 EC2(`aws_instance.rin`)와 `rin-host` 역할, 인스턴스 프로파일, 보안 그룹 정의가 아직 남아 있다. 이 정의를 지우기 전에 `./tf.sh apply`를 실행하면 EC2를 다시 만든다.
 - 같은 Slack 앱으로 로컬과 GCP VM을 동시에 띄우지 않는다. 로컬 시험이 필요하면 GCP VM 쪽을 먼저 멈춘다.
 
