@@ -1,6 +1,6 @@
 # GCP 전용 호스트 배포와 전환
 
-현재 운영 대상은 EC2다. 이 문서는 승인 후 전환할 경로이며 VM 생성, 데이터 이전 또는 bot 전환을 실행했다는 뜻이 아니다. 원본 EC2와 runner/GKE/router/DNS는 이 코드로 변경하지 않는다.
+2026-11-06에 아래 절차로 EC2에서 GCP VM `hopcharlie-rin`으로 전환했고, 지금 운영 대상은 GCP VM이다(`RIN_DEPLOY_TARGET=gcp`). 원본 EC2는 종료했다. 아래 "실제 전환 순서"는 그때 따른 절차의 기록이다. runner, GKE, router, DNS는 이 코드로 변경하지 않는다.
 
 ## 공개 설정 계약
 
