@@ -1,8 +1,7 @@
 name: deploy
 
 # Builds the image, pushes it to ECR as hopcharlie/rin:<sha> and deploys it on
-# the EC2 host through SSM Run Command (deploy/ec2/deploy.sh, which rolls back
-# on failure). AWS resources and one-time setup: deploy/aws/README.md.
+# EC2 by default, or a restored GCP host over IAP. See deploy/gcp/README.md.
 
 on:
   push:
@@ -25,8 +24,14 @@ jobs:
   deploy:
     runs-on: [self-hosted, hopcharlie]
     timeout-minutes: 30
+    env:
+      RIN_DEPLOY_TARGET: ${{ vars.RIN_DEPLOY_TARGET || 'aws' }}
     steps:
       - uses: actions/checkout@v7
+
+      - name: Validate deployment target
+        run: |
+          case "$RIN_DEPLOY_TARGET" in aws|gcp) ;; *) echo 'invalid RIN_DEPLOY_TARGET' >&2; exit 1;; esac
 
       # rin-deploy trusts only this repository's main branch.
       - uses: aws-actions/configure-aws-credentials@v6
@@ -52,16 +57,23 @@ jobs:
           echo "image=$image" >> "$GITHUB_OUTPUT"
 
       - name: Deploy on EC2
+        if: env.RIN_DEPLOY_TARGET == 'aws'
         env:
           IMAGE: ${{ steps.image.outputs.image }}
           INSTANCE_ID: ${{ vars.RIN_INSTANCE_ID }}
         run: |
           # Runs as root on the host. deploy.sh and the compose files come from the
           # image itself, so the host always runs the scripts of the version it deploys.
-          params="$(jq -cn --arg image "$IMAGE" '{commands: [
+          preflight="$(base64 < deploy/gcp/disk-preflight.sh | tr -d '\n')"
+          params="$(jq -cn --arg image "$IMAGE" --arg preflight "$preflight" '{commands: [
             "set -eu",
             "export HOME=/root",
+            "stage=$(mktemp -d /run/rin-deploy.XXXXXX)",
+            "export DOCKER_CONFIG=$stage/docker",
+            "trap \"rm -rf -- \\\"$stage\\\"\" EXIT",
+            "printf %s \($preflight) | base64 -d > \"$stage/disk-preflight.sh\"",
             "image=\($image)",
+            "bash \"$stage/disk-preflight.sh\" \"$image\"",
             "aws ecr get-login-password --region ap-northeast-2 | docker login --username AWS --password-stdin \"${image%%/*}\"",
             "docker pull -q \"$image\"",
             "cid=$(docker create \"$image\")",
@@ -105,3 +117,39 @@ jobs:
             echo "::error::deploy on $INSTANCE_ID ended with $status"
             exit 1
           fi
+
+      # Re-assume after push: this session and its registry token cannot upload images.
+      - name: AWS read-only deployment session
+        if: env.RIN_DEPLOY_TARGET == 'gcp'
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.RIN_DEPLOY_ROLE_ARN }}
+          aws-region: ap-northeast-2
+          unset-current-credentials: true
+          inline-session-policy: >-
+            {"Version":"2012-10-17","Statement":[
+              {"Effect":"Allow","Action":"ecr:GetAuthorizationToken","Resource":"*"},
+              {"Effect":"Allow","Action":["ecr:BatchGetImage","ecr:GetDownloadUrlForLayer","ecr:BatchCheckLayerAvailability"],"Resource":"arn:aws:ecr:ap-northeast-2:*:repository/hopcharlie/rin"},
+              {"Effect":"Allow","Action":"ssm:GetParametersByPath","Resource":["arn:aws:ssm:ap-northeast-2:*:parameter/rin","arn:aws:ssm:ap-northeast-2:*:parameter/rin/*"]},
+              {"Effect":"Allow","Action":"kms:Decrypt","Resource":"*","Condition":{"StringEquals":{"kms:ViaService":"ssm.ap-northeast-2.amazonaws.com"},"StringLike":{"kms:EncryptionContext:PARAMETER_ARN":"arn:aws:ssm:ap-northeast-2:*:parameter/rin/*"}}}
+            ]}
+
+      - name: Authenticate for Rin IAP and OS Login
+        if: env.RIN_DEPLOY_TARGET == 'gcp'
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.RIN_GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.RIN_GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - name: Set up gcloud
+        if: env.RIN_DEPLOY_TARGET == 'gcp'
+        uses: google-github-actions/setup-gcloud@v3
+
+      - name: Deploy on GCP through IAP
+        if: env.RIN_DEPLOY_TARGET == 'gcp'
+        env:
+          IMAGE: ${{ steps.image.outputs.image }}
+          RIN_GCP_PROJECT_ID: ${{ vars.RIN_GCP_PROJECT_ID }}
+          RIN_GCP_ZONE: ${{ vars.RIN_GCP_ZONE }}
+          RIN_GCP_INSTANCE: ${{ vars.RIN_GCP_INSTANCE }}
+        run: bash deploy/gcp/send.sh

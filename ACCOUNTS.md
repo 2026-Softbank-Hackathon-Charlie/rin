@@ -4,7 +4,7 @@ Rin이 외부 서비스에 접근할 때 쓰는 신원을 모두 여기에 적�
 
 ## 규칙
 
-- 비밀값은 SSM Parameter Store `/rin/<KEY>`(서울, SecureString)에 둔다. 배포할 때 `deploy/ec2/deploy.sh`가 `/rin/*`를 모두 컨테이너 환경 변수로 옮기므로, 키를 넣고 재배포하면 바로 쓰인다. 넣을 때는 `deploy/aws/put-secrets.sh`를 쓴다.
+- 비밀값은 SSM Parameter Store `/rin/<KEY>`(서울, SecureString)에 둔다. EC2 배포는 `deploy/ec2/deploy.sh`가 `/rin/*`를 읽고, GCP 배포는 CI의 제한된 AWS OIDC 세션이 읽어 IAP로 한 번 쓰는 root-only env 파일을 전달한다. Compose 생성 뒤 임시 env는 지운다. 컨테이너 환경 변수로 옮기므로, 키를 넣고 재배포하면 바로 쓰인다. 넣을 때는 `deploy/aws/put-secrets.sh`를 쓴다.
 - 작업 공간, 메모리, `CLAUDE.md`, Slack, Notion에는 비밀값을 두지 않는다.
 - Rin 전용 신원을 따로 만들고 권한은 읽기 전용부터 준다. 쓰기 권한은 필요할 때 따로 만들고, 요청자가 명시했을 때만 쓰도록 guard를 건다.
 - 예외: HopCharlie 플랫폼에는 Rin 전용 신원이 없다. CLI 토큰은 device code를 승인한 관리자의 이름을 달고 동작한다. 감사 로그에도 그 이름이 남고, 기록의 `via` 필드(`via charlie v0.5.0 on rin-sbx-7-a1b2c3`)를 보고 Rin이 한 일임을 구분한다. `via`는 로그인을 시작한 실행의 클라이언트라서, 어느 실행이 한 일인지는 알 수 없다.
@@ -34,3 +34,9 @@ Claude Code는 실행마다 worker가 띄우는 샌드박스 컨테이너에서 
 - 샌드박스 안에서 Claude는 sudo를 쓸 수 있다. 샌드박스에는 Docker 소켓이 없고, EC2 메타데이터 응답의 hop 제한이 1이라서 인스턴스 역할도 쓸 수 없다.
 - worker는 샌드박스를 띄우기 위해 호스트의 Docker 소켓을 가진다. 그래서 worker 안에서 코드가 실행되면 호스트 root를 얻은 것과 같다. worker는 Claude가 쓴 파일을 실행하지 않는다. `/data` 아래(`repos/`, `worktrees/` 포함)는 모든 샌드박스가 쓸 수 있으므로, worker는 그 안에서 git을 포함한 어떤 명령도 실행하지 않는다. git hook이나 설정을 심어도 샌드박스 안에서만 돈다.
 - 남은 한계: Anthropic API 키, `/data/claude`의 Notion OAuth 토큰, `/data/tools/charlie`의 charlie 토큰은 Claude가 읽을 수 있다. charlie 토큰을 읽으면 guard를 거치지 않고 API를 직접 부를 수 있으므로, 승인할 때 역할을 필요한 만큼만 고른다. 로컬 개발(`compose.dev.yaml`)에는 샌드박스가 없어서 Claude가 worker 컨테이너 안에서 돈다.
+
+## GCP 배포 신원 (전환 준비)
+
+- GitHub `main`의 Rin 전용 GCP Workload Identity Federation → `RIN_GCP_DEPLOY_SERVICE_ACCOUNT` 신원은 IAP/OS Login admin 및 필요한 VM 조회에만 쓴다. 대상 VM에는 runtime service account나 AWS deploy 장기키를 붙이지 않는다. 공개 변수와 이전 상태는 [GCP runbook](deploy/gcp/README.md)을 따른다.
+- AWS `rin-deploy`의 build/push 세션을 host에 전달하지 않는다. push 이후 session policy로 SSM `/rin`, SSM 경유 KMS decrypt 및 ECR `hopcharlie/rin` pull만 허용한 임시 세션에서 registry token을 발급한다. host는 token만 private `/run` Docker config에 받고 pull 직후 제거한다. AWS session access key/secret/session token은 host에 저장하지 않는다.
+- GCP metadata HTTP 접근은 Docker forwarding 경계에서 차단하며, no-runtime-SA 설정과 함께 sandbox에서 직접 차단을 검증한다. 기존 EC2 hop-limit 설명은 EC2 경로에 계속 적용된다.
