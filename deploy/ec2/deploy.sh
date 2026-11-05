@@ -14,6 +14,7 @@
 # 5. Old workers get SIGTERM and will not restart: they take no new jobs, finish the ones
 #    they run (up to 2 hours) and exit on their own. The workers share one concurrency
 #    limit through the database, so the overlap never runs more Claude sessions than usual.
+set +x
 set -euo pipefail
 
 image="${1:?usage: deploy.sh <image>}"
@@ -24,6 +25,28 @@ health_timeout=180
 tag="${image##*:}"
 version="${tag:0:7}"
 project="rin-$version"
+env_tmp=""
+env_written=false
+cleanup_env() {
+  [ -z "$env_tmp" ] || rm -f -- "$env_tmp"
+  if "$env_written"; then rm -f -- "$env_file"; fi
+}
+trap cleanup_env EXIT
+trap 'exit 130' INT
+trap 'exit 143' HUP TERM
+
+# Only a root-owned, one-shot file inside a private root-owned directory is accepted.
+private_env() {
+  local input="$1" parent
+  parent="$(dirname -- "$input")"
+  [ "$(id -u)" = 0 ] && [ -f "$input" ] && [ ! -L "$input" ] &&
+    [ ! -L "$parent" ] && [ "$(stat -c %u "$input")" = 0 ] &&
+    [ "$(stat -c %a "$input")" = 600 ] && [ "$(stat -c %h "$input")" = 1 ] &&
+    [ "$(stat -c %u "$parent")" = 0 ] && [ "$(stat -c %a "$parent")" = 700 ] || {
+      echo 'unsafe RIN_ENV_FILE: expected root-owned 0600 file in a root-owned 0700 directory' >&2
+      return 1
+    }
+}
 
 db() { # <docker compose arguments...>
   docker compose -p rin -f "$dir/compose.db.yaml" --env-file "$env_file" "$@"
@@ -38,15 +61,22 @@ app() { # <docker compose arguments...> for the new version
 # Every /rin/<KEY> parameter becomes KEY=VALUE. /run is tmpfs, so the secrets
 # never reach the disk; running containers keep their environment on reboot.
 write_env() {
-  local tmp name value
-  tmp="$(mktemp /run/rin.env.XXXXXX)"
-  chmod 600 "$tmp"
-  aws ssm get-parameters-by-path --region "$region" --path /rin --with-decryption \
-    --query 'Parameters[].[Name,Value]' --output text |
-    while IFS=$'\t' read -r name value; do
-      printf '%s=%s\n' "${name#/rin/}" "$value"
-    done > "$tmp"
-  mv -f "$tmp" "$env_file"
+  local name value
+  if [ -n "${RIN_ENV_FILE:-}" ]; then private_env "$RIN_ENV_FILE"; fi
+  env_tmp="$(mktemp /run/rin.env.XXXXXX)"
+  chmod 600 "$env_tmp"
+  if [ -n "${RIN_ENV_FILE:-}" ]; then
+    cat -- "$RIN_ENV_FILE" > "$env_tmp"
+  else
+    aws ssm get-parameters-by-path --region "$region" --path /rin --with-decryption \
+      --query 'Parameters[].[Name,Value]' --output text |
+      while IFS=$'\t' read -r name value; do
+        printf '%s=%s\n' "${name#/rin/}" "$value"
+      done > "$env_tmp"
+  fi
+  mv -fT "$env_tmp" "$env_file"
+  env_tmp=""
+  env_written=true
 }
 
 # Waits up to $health_timeout seconds for the services to be healthy.
@@ -103,6 +133,8 @@ others worker | while read -r id proj state; do
   fi
 done
 
+if [ -f "$dir/current-image" ] && [ "$(cat "$dir/current-image")" != "$image" ]; then
+  cp -- "$dir/current-image" "$dir/previous-image"
+fi
 printf '%s\n' "$image" > "$dir/current-image"
-docker image prune -af --filter until=168h > /dev/null || echo "image prune failed" >&2
 echo "result: deployed $version"
