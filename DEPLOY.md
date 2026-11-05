@@ -4,19 +4,28 @@
 
 ## 현재 상태
 
-- EC2 `i-05d4ba044ec963ed0`(서울)에서 돈다. 인프라는 `deploy/aws/`의 Terraform으로 관리하고, 처음 만드는 순서는 `deploy/aws/README.md`에 있다.
-- GCP 전용 host 전환 코드는 준비 경로이며, 현재 운영이 이전됐다는 뜻은 아니다. `RIN_DEPLOY_TARGET` 미설정/`aws`는 기존 EC2, 복원 검증 후 `gcp`는 IAP/OS Login을 쓴다. 공개 변수·전환·복귀·재부팅 절차는 [GCP runbook](deploy/gcp/README.md)에 있다.
-- 같은 Slack 앱으로 로컬과 EC2를 동시에 띄우지 않는다. 로컬 시험이 필요하면 EC2 쪽을 먼저 멈춘다.
+- GCP Compute Engine VM `hopcharlie-rin`에서 돈다. 프로젝트는 `project-b47cdba3-db5b-42a2-9a6`, 존은 `asia-northeast3-a`(서울)이고, e2-standard-2(2 vCPU, 8GiB)에 40GiB pd-balanced 디스크를 쓴다. VM에는 runtime service account를 붙이지 않았고, 접속은 IAP로만 한다.
+- VM, IAP 방화벽, GitHub용 Workload Identity Federation과 배포 서비스 계정, `rin-deploy` 역할에 더한 inline policy `rin-gcp-deploy-read`(SSM `/rin` 읽기, KMS 복호화)는 infra 레포의 `terraform/environments/gcp/dev/rin`이 관리한다([infra#92](https://github.com/2026-Softbank-Hackathon-Charlie/infra/pull/92)).
+- 2026-11-06에 AWS EC2 `i-05d4ba044ec963ed0`에서 옮겨 왔다. 이전 절차와 검증 결과는 [infra#86](https://github.com/2026-Softbank-Hackathon-Charlie/infra/issues/86)에 있다. 옛 EC2는 종료했고, 이전 직후에 만든 원본 디스크 스냅샷 `snap-020c500e21c7a614d`만 남아 있다.
+- 레포 변수 `RIN_DEPLOY_TARGET`이 `gcp`라서 main 배포는 GCP VM으로 간다. GCP 쪽 레포 변수와 전환 절차는 [deploy/gcp/README.md](deploy/gcp/README.md)에 있다.
+- 이미지, 비밀값, CI 역할은 AWS에 그대로 둔다. ECR `hopcharlie/rin`, SSM 서울 `/rin/*`, IAM 역할 `rin-deploy`, IAM 사용자 `rin-ai`는 GCP 배포와 Rin이 계속 쓰므로 지우지 않는다. 이 리소스는 `rin-gcp-deploy-read`를 빼고 `deploy/aws/`의 Terraform이 관리한다.
+- `deploy/aws/main.tf`에는 종료한 EC2(`aws_instance.rin`)와 `rin-host` 역할, 인스턴스 프로파일, 보안 그룹 정의가 아직 남아 있다. 이 정의를 지우기 전에 `./tf.sh apply`를 실행하면 EC2를 다시 만든다.
+- 같은 Slack 앱으로 로컬과 GCP VM을 동시에 띄우지 않는다. 로컬 시험이 필요하면 GCP VM 쪽을 먼저 멈춘다.
 
 ## 배포 흐름 (교대 배포)
 
-main에 머지하면 `.github/workflows/deploy.yml`이 동작한다.
+main에 머지하면 `.github/workflows/deploy.yml`이 조직 self-hosted runner(`[self-hosted, hopcharlie]`)에서 동작한다.
 
-1. GitHub OIDC로 AWS 역할 `rin-deploy`를 받는다.
-2. 이미지를 빌드해 ECR `hopcharlie/rin:<커밋 sha>`에 올린다.
-3. SSM Run Command로 EC2에서 새 이미지의 `deploy/ec2/deploy.sh`, `deploy/compose.db.yaml`, `deploy/compose.app.yaml`을 꺼내 `/srv/rin`에 두고 `deploy.sh`를 실행한다.
+1. GitHub OIDC로 AWS 역할 `rin-deploy`를 받고, 이미지를 빌드해 ECR `hopcharlie/rin:<커밋 sha>`에 올린다.
+2. 같은 역할을 session policy로 다시 받는다. 이 세션은 ECR pull, SSM `/rin` 읽기, SSM을 거친 KMS 복호화만 할 수 있다. push할 때 쓴 세션과 토큰은 VM에 보내지 않는다.
+3. GitHub OIDC로 GCP Workload Identity Federation을 거쳐 서비스 계정 `RIN_GCP_DEPLOY_SERVICE_ACCOUNT`로 인증한다.
+4. `deploy/gcp/send.sh`가 2의 세션으로 `/rin/*`를 읽어 env 파일을 만들고, pull 전용 ECR 토큰을 받는다. env 파일, ECR 토큰, 이미지 이름, `disk-preflight.sh`를 tar로 묶어 IAP SSH(`gcloud compute ssh --tunnel-through-iap`)의 stdin으로 보낸다. 비밀값은 명령 인자나 로그에 들어가지 않는다.
+5. VM에서 root로 도는 `deploy/gcp/receive.sh`가 `/srv/rin/.migration-ready`를 확인하고 tar를 `/run/rin-deploy.*`에 푼다. `disk-preflight.sh`로 공간을 확인하고, 이미지를 pull한 뒤 ECR 토큰을 지운다.
+6. 새 이미지에서 `deploy/ec2/deploy.sh`, `deploy/compose.db.yaml`, `deploy/compose.app.yaml`을 꺼내 `/srv/rin`에 두고, env 파일을 `RIN_ENV_FILE`로 넘겨 `deploy.sh`를 실행한다. `deploy.sh`는 경로 이름과 달리 GCP VM에서도 그대로 쓴다.
 
-GCP를 선택하면 같은 build/ECR push 뒤에 read-only AWS 세션으로 env와 pull token을 준비하고 IAP stdin으로 root-only `/run` 임시 파일을 전달한다. `/srv/rin/.migration-ready` 없이는 bot을 만들지 않는다. 두 대상 모두 pull 전 사용 중/직전 성공 이미지를 보존하며 Rin의 불필요한 이미지만 정리하고 8GiB 여유가 없으면 기존 서비스를 유지한 채 실패한다.
+`disk-preflight.sh`는 pull 전에 쓰지 않는 Rin 이미지만 지운다. 사용 중인 이미지와 직전에 성공한 이미지는 남기고, 정리한 뒤에도 8GiB 여유가 없으면 기존 서비스를 그대로 둔 채 실패한다.
+
+워크플로에는 EC2로 배포하는 단계(`RIN_DEPLOY_TARGET`이 없거나 `aws`일 때 SSM Run Command로 배포)가 아직 남아 있다. EC2를 종료했으므로 이 변수를 지우거나 `aws`로 바꾸면 배포가 실패한다.
 
 `deploy.sh`는 돌고 있는 Rin을 끊지 않고 새 버전으로 넘긴다.
 
@@ -44,9 +53,25 @@ GCP를 선택하면 같은 build/ECR push 뒤에 read-only AWS 세션으로 env�
 ## Rin이 자기 레포를 고칠 때
 
 - 코드 변경은 `rin/` 브랜치와 PR로 올린다. 머지되면 위 흐름으로 몇 분 안에 배포된다. 이번 실행은 옛 worker에서 끝까지 마무리된다.
-- `deploy/ec2/deploy.sh`나 compose 파일이 깨지면 새 버전이 뜨지 않을 뿐 옛 버전은 계속 돈다. 그래도 이 파일들을 고칠 때는 PR 본문에 그 사실을 밝힌다.
+- `deploy/ec2/deploy.sh`, `deploy/gcp/*.sh`나 compose 파일이 깨지면 새 버전이 뜨지 않을 뿐 옛 버전은 계속 돈다. 그래도 이 파일들을 고칠 때는 PR 본문에 그 사실을 밝힌다.
 - `compose.db.yaml`의 postgres 정의를 바꾸면 DB 컨테이너가 다시 만들어진다. 꼭 필요할 때만 바꾼다.
 
 ## 한 번 쓰는 env와 재부팅
 
-EC2는 기존 SSM 조회를 유지하고, GCP는 `RIN_ENV_FILE`로 root 소유 0600 파일(소유 디렉터리 0700)을 받는다. Compose 생성용 `/run/rin.env`는 성공·실패 뒤 제거한다. 일반 reboot는 기존 Docker 컨테이너의 `unless-stopped` 정책과 저장된 env로 복구한다. 컨테이너 삭제 후 재생성에는 CI가 env를 다시 전달해야 하며 boot에서 Compose를 재생성하지 않는다.
+GCP VM에는 SSM에서 읽은 env를 파일로 남겨 두지 않는다. `deploy.sh`는 `RIN_ENV_FILE`로 받은 root 소유 0600 파일(소유 디렉터리 0700)로 Compose를 만들고, 그때 쓴 `/run/rin.env`는 성공하든 실패하든 지운다.
+
+일반 재부팅은 Docker가 `unless-stopped` 컨테이너를 저장된 env로 다시 띄워서 복구한다. 부팅할 때 Compose를 다시 만들거나 SSM을 읽지 않는다. 그래서 컨테이너를 지웠거나 비밀값을 바꿨으면 deploy 워크플로를 다시 돌려 env를 다시 전달해야 한다. 비밀값은 `deploy/aws/put-secrets.sh`로 SSM에 넣은 뒤 워크플로를 수동으로 돌린다.
+
+## 호스트에 들어가기
+
+IAP 터널과 OS Login 권한이 있는 GCP 계정이 필요하다.
+
+```bash
+gcloud compute ssh hopcharlie-rin --project project-b47cdba3-db5b-42a2-9a6 --zone asia-northeast3-a --tunnel-through-iap
+sudo docker compose -p rin ps                                       # postgres
+sudo docker ps --filter label=com.docker.compose.service=worker     # worker(drain 중인 옛 버전 포함)
+```
+
+## AWS로 되돌리기
+
+EC2를 종료했으므로 `RIN_DEPLOY_TARGET`만 `aws`로 바꿔서는 돌아갈 수 없다. 돌아가려면 Terraform으로 EC2를 새로 만들고, GCP VM의 Rin을 멈춘 뒤 `/srv/rin/pg`와 `/srv/rin/data`를 옮기고 검증해야 한다. 스냅샷 `snap-020c500e21c7a614d`는 이전 시점의 데이터라서, 그 뒤에 쌓인 작업, 세션, 첨부 파일은 들어 있지 않다.
