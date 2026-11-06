@@ -1,81 +1,74 @@
-# Rin AWS 배포
+# Rin이 계속 쓰는 AWS 리소스
 
-Rin을 EC2 한 대에서 Docker Compose(`deploy/compose.db.yaml`, `deploy/compose.app.yaml`)로 띄운다. main에 머지하면 `.github/workflows/deploy.yml`이 이미지를 ECR `hopcharlie/rin:<sha>`에 올리고, SSM Run Command로 호스트에서 `deploy/ec2/deploy.sh`를 실행한다.
+Rin은 GCP VM `hopcharlie-rin`에서 운영한다. 이 Terraform root는 GCP 배포와 앱이 계속 쓰는 AWS 리소스를 관리한다. EC2와 `rin-host` 역할·인스턴스 프로파일·보안 그룹은 만들지 않는다. 배포 흐름과 GCP 접속은 [DEPLOY.md](../../DEPLOY.md)와 [GCP runbook](../gcp/README.md)을 따른다.
 
-## 만드는 것
+## 소유권과 유지하는 리소스
+
+기존 state `s3://hopcharlie-tfstate-525091405886-apne2/rin/terraform.tfstate`는 계속 **rin 레포의 `deploy/aws/`**가 관리한다. backend를 바꾸거나 state를 다른 root로 옮기지 않는다.
 
 | 리소스 | 내용 |
 | --- | --- |
-| EC2 | t3.large 1대, Amazon Linux 2023, 기본 VPC 공인 서브넷, gp3 40GiB. 들어오는 포트는 없고 SSM으로만 접속한다 |
-| ECR | `hopcharlie/rin`. 최근 이미지 20개만 남긴다 |
-| IAM 역할 `rin-host` | 호스트용. SSM 접속, `/rin/*` 파라미터 읽기, ECR 읽기. IMDS 홉 제한이 1이라 컨테이너는 이 역할을 쓰지 못한다 |
-| IAM 역할 `rin-deploy` | GitHub Actions용. 이 레포 main 브랜치만 쓸 수 있다. ECR 푸시와 호스트에 대한 Run Command |
-| IAM 사용자 `rin-ai` | Rin이 쓰는 AWS 계정. `ViewOnlyAccess`만 있고 파라미터, 비밀값, S3 객체 읽기와 KMS 복호화는 막혀 있다 |
-| SSM 파라미터 | `/rin/POSTGRES_PASSWORD`, `/rin/RIN_AI_AWS_ACCESS_KEY_ID`, `/rin/RIN_AI_AWS_SECRET_ACCESS_KEY`는 Terraform이 만든다. 나머지는 `put-secrets.sh`로 넣는다 |
+| ECR | `hopcharlie/rin`. 최근 이미지 20개를 남긴다 |
+| IAM 역할 `rin-deploy`와 `push-image-and-deploy` 정책 | 이 레포 main의 GitHub OIDC 신원만 허용한다. ECR push/pull과 로그인 권한을 유지하며 EC2 Run Command 권한은 없다 |
+| IAM 사용자 `rin-ai`와 키 | 기존 앱용 신원과 키를 유지한다. `ViewOnlyAccess`와 비밀값·객체 읽기 거부 정책도 유지한다 |
+| SSM 파라미터 | Terraform은 `/rin/POSTGRES_PASSWORD`, `/rin/RIN_AI_AWS_ACCESS_KEY_ID`, `/rin/RIN_AI_AWS_SECRET_ACCESS_KEY`를 관리한다. 나머지 `/rin/*`는 `put-secrets.sh`로 넣는다 |
+| GitHub OIDC provider | 다른 레포와 공유하는 기존 provider를 data source로 참조한다 |
 
-비용은 서울 리전 온디맨드 기준으로 하루 약 2.7달러다.
+GCP VM·WIF·배포 서비스 계정과 `rin-deploy`의 별도 inline policy **`rin-gcp-deploy-read`는 infra 레포의 `terraform/environments/gcp/dev/rin`이 관리한다.** 이 root에서는 해당 정책을 정의하거나 제거하지 않는다. CI는 이 정책으로 `/rin/*`와 SSM 경유 KMS 복호화 권한을 얻고, session policy로 ECR pull·SSM 읽기만 허용한 세션을 GCP 배포에 사용한다.
 
-## 처음 한 번 하는 일
+기존 EC2의 백업 스냅샷 `snap-020c500e21c7a614d`는 Terraform 밖에서 만들었으므로 이 root가 삭제하지 않는다. 보관·삭제는 별도 결정이다.
 
-필요한 것은 Docker, AWS CLI v2.9 이상, `gh`, 해커톤 계정(525091405886)용 AWS CLI 프로필이다. 프로필 이름이 `hopcharlie`가 아니면 `AWS_PROFILE`로 지정한다. Terraform은 `tf.sh`가 Docker 이미지로 실행하고, 다른 계정의 프로필이면 실행 전에 멈춘다.
+## 기존 호스트 정의 정리
 
-1. 인프라를 만든다.
-
-   ```bash
-   cd deploy/aws
-   ./tf.sh init
-   ./tf.sh plan
-   ./tf.sh apply
-   ```
-
-2. 비밀값을 넣는다. 레포 밖에 파일을 만들고 `KEY=VALUE`를 한 줄에 하나씩, 따옴표 없이 적는다. 스크립트는 키 이름만 출력한다.
-
-   ```bash
-   # ~/rin-secrets.env
-   # ANTHROPIC_API_KEY=...
-   # SLACK_BOT_TOKEN=xoxb-...
-   # SLACK_APP_TOKEN=xapp-...
-   # GITHUB_APP_ID=...
-   # GITHUB_APP_INSTALLATION_ID=...
-   # GITHUB_APP_PRIVATE_KEY_B64=...   (base64 -w0 github-app.pem 의 결과)
-   ./put-secrets.sh ~/rin-secrets.env
-   ```
-
-   `RIN_MODEL` 같은 설정값도 같은 파일에 넣으면 컨테이너 환경 변수가 된다. Terraform이 만드는 세 파라미터는 이 파일에 넣지 않는다.
-
-3. 레포 변수를 설정한다.
-
-   ```bash
-   gh variable set RIN_DEPLOY_ROLE_ARN --repo 2026-Softbank-Hackathon-Charlie/rin --body "$(./tf.sh output -raw deploy_role_arn)"
-   gh variable set RIN_INSTANCE_ID --repo 2026-Softbank-Hackathon-Charlie/rin --body "$(./tf.sh output -raw instance_id)"
-   ```
-
-4. 첫 배포를 수동으로 돌린다. 호스트가 처음 부팅하며 Docker를 설치하는 데 몇 분 걸리므로 apply 후 5분쯤 기다린다.
-
-   ```bash
-   gh workflow run deploy.yml --repo 2026-Softbank-Hackathon-Charlie/rin --ref main
-   gh run watch --repo 2026-Softbank-Hackathon-Charlie/rin
-   ```
-
-   성공하면 `#final_team_charlie`에 "Rin 배포 완료"가 올라온다.
-
-## 배포가 하는 일
-
-`deploy.sh`는 다음 순서로 돈다.
-
-1. `/rin/*` 파라미터를 모두 읽어 `/run/rin.env`(root만 읽기)에 쓴다.
-2. 새 이미지로 `docker compose up -d`를 실행하고, gateway와 worker가 180초 안에 healthy가 되기를 기다린다. 기존 worker는 진행 중인 작업을 끝내느라 멈추는 데 최대 5분이 걸릴 수 있고, 180초는 그 뒤부터 센다.
-3. 성공하면 `/srv/rin/current-image`에 이미지를 기록하고 Slack에 알린 뒤 7일 지난 이미지를 지운다.
-4. 실패하면 직전 이미지로 같은 방법으로 되돌리고 Slack에 알린다. 워크플로도 실패로 끝난다.
-
-비밀값을 바꾼 뒤에는 `put-secrets.sh`를 다시 실행하고 워크플로를 수동으로 돌려야 컨테이너에 반영된다.
-
-## 호스트에 들어가기
-
-Session Manager 플러그인이 필요하다.
+Docker, AWS CLI, 해커톤 계정 `525091405886`의 AWS 프로필이 필요하다. `tf.sh`는 공식 Terraform 1.17.1 이미지로 실행하고 다른 계정이면 시작 전에 멈춘다. 프로필 이름이 `hopcharlie`가 아니면 `AWS_PROFILE`을 지정한다.
 
 ```bash
-aws ssm start-session --profile hopcharlie --region ap-northeast-2 --target "$(./tf.sh output -raw instance_id)"
-sudo docker compose -p rin ps
-sudo docker logs --tail 100 rin-worker-1
+cd deploy/aws
+export AWS_PROFILE=softbank-charlie  # 사용하는 해커톤 계정 프로필
+./tf.sh init
+./tf.sh plan -out=tfplan
 ```
+
+검토할 계획의 범위는 다음과 같다.
+
+1. create와 replacement가 0개여야 한다. 이미 종료한 EC2는 refresh로 state에서 빠지며 새로 만들지 않는다.
+2. 남아 있는 `rin-host` 역할·역할 정책·SSM 정책 연결·인스턴스 프로파일·보안 그룹만 제거한다.
+3. `push-image-and-deploy`만 in-place update하여 EC2 Run Command 문을 제거한다. `instance_id` output도 사라진다.
+4. ECR, SSM 파라미터, `rin-ai`와 키, `rin-deploy` 역할과 trust에는 변경이 없어야 한다. 다른 변경이 있으면 적용하지 않는다.
+
+검토·승인한 저장 계획만 적용한다.
+
+```bash
+./tf.sh apply tfplan
+rm -f tfplan
+```
+
+계획 파일에는 비밀값이 포함될 수 있으므로 공유하거나 커밋하지 않는다(`tfplan`은 `.gitignore`에 있다). 이 root의 전체 `destroy`는 운영 중인 ECR·SSM·신원을 삭제하므로 호스트 정리에 사용하지 않는다. 관련 이슈는 [infra#93](https://github.com/2026-Softbank-Hackathon-Charlie/infra/issues/93)이다.
+
+## 비밀값과 배포 설정
+
+비밀값은 레포 밖의 `KEY=VALUE` 파일로 준비한다. 키는 대문자·숫자·밑줄만 사용하고 값을 따옴표로 감싸지 않는다. `put-secrets.sh`는 값 대신 키 이름만 출력한다.
+
+```bash
+./put-secrets.sh ~/rin-secrets.env
+```
+
+Terraform이 관리하는 세 파라미터는 위 파일에 넣지 않는다. `RIN_MODEL` 같은 설정은 같은 파일로 넣을 수 있다. 비밀값 변경 후 승인된 GCP 배포를 실행해야 컨테이너에 반영된다.
+
+GitHub Actions에는 기존 배포 역할과 [GCP runbook의 공개 변수](../gcp/README.md#공개-설정-계약)를 사용한다. `RIN_INSTANCE_ID`는 사용하지 않는다.
+
+```bash
+gh variable set RIN_DEPLOY_ROLE_ARN --repo 2026-Softbank-Hackathon-Charlie/rin --body "$(./tf.sh output -raw deploy_role_arn)"
+```
+
+main 병합 후 deploy workflow가 ECR에 이미지를 올리고, read-only AWS 세션으로 env와 ECR pull token을 받아 IAP로 GCP에 전달한다. 배포 성공 여부는 GitHub Actions에서 확인한다.
+
+## 로컬 검증
+
+```bash
+./tf.sh fmt -check -recursive
+./tf.sh validate
+./tf.sh test
+```
+
+`tests/retirement.tftest.hcl`은 AWS와 random provider를 모두 mock한다. 실제 AWS API를 호출하지 않고 ECR 권한의 정확한 범위와 기존 OIDC 신뢰·신원·SSM 이름을 검사한다. 실제 삭제 대상과 유지 리소스의 무변경 여부는 위의 실제 state 기준 plan으로 확인한다.

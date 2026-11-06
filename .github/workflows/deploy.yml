@@ -1,7 +1,7 @@
 name: deploy
 
-# Builds the image, pushes it to ECR as hopcharlie/rin:<sha> and deploys it on
-# EC2 by default, or a restored GCP host over IAP. See deploy/gcp/README.md.
+# Builds the image, pushes it to ECR as hopcharlie/rin:<sha> and deploys it
+# to the GCP host over IAP. See deploy/gcp/README.md.
 
 on:
   push:
@@ -24,14 +24,8 @@ jobs:
   deploy:
     runs-on: [self-hosted, hopcharlie]
     timeout-minutes: 30
-    env:
-      RIN_DEPLOY_TARGET: ${{ vars.RIN_DEPLOY_TARGET || 'aws' }}
     steps:
       - uses: actions/checkout@v7
-
-      - name: Validate deployment target
-        run: |
-          case "$RIN_DEPLOY_TARGET" in aws|gcp) ;; *) echo 'invalid RIN_DEPLOY_TARGET' >&2; exit 1;; esac
 
       # rin-deploy trusts only this repository's main branch.
       - uses: aws-actions/configure-aws-credentials@v6
@@ -56,71 +50,8 @@ jobs:
           docker push "$image"
           echo "image=$image" >> "$GITHUB_OUTPUT"
 
-      - name: Deploy on EC2
-        if: env.RIN_DEPLOY_TARGET == 'aws'
-        env:
-          IMAGE: ${{ steps.image.outputs.image }}
-          INSTANCE_ID: ${{ vars.RIN_INSTANCE_ID }}
-        run: |
-          # Runs as root on the host. deploy.sh and the compose files come from the
-          # image itself, so the host always runs the scripts of the version it deploys.
-          preflight="$(base64 < deploy/gcp/disk-preflight.sh | tr -d '\n')"
-          params="$(jq -cn --arg image "$IMAGE" --arg preflight "$preflight" '{commands: [
-            "set -eu",
-            "export HOME=/root",
-            "stage=$(mktemp -d /run/rin-deploy.XXXXXX)",
-            "export DOCKER_CONFIG=$stage/docker",
-            "trap \"rm -rf -- \\\"$stage\\\"\" EXIT",
-            "printf %s \($preflight) | base64 -d > \"$stage/disk-preflight.sh\"",
-            "image=\($image)",
-            "bash \"$stage/disk-preflight.sh\" \"$image\"",
-            "aws ecr get-login-password --region ap-northeast-2 | docker login --username AWS --password-stdin \"${image%%/*}\"",
-            "docker pull -q \"$image\"",
-            "cid=$(docker create \"$image\")",
-            "docker cp \"$cid:/app/deploy/ec2/deploy.sh\" /srv/rin/deploy.sh",
-            "docker cp \"$cid:/app/deploy/compose.db.yaml\" /srv/rin/compose.db.yaml",
-            "docker cp \"$cid:/app/deploy/compose.app.yaml\" /srv/rin/compose.app.yaml",
-            "docker rm \"$cid\" >/dev/null",
-            "bash /srv/rin/deploy.sh \"$image\""
-          ]}')"
-
-          cmd_id="$(aws ssm send-command \
-            --instance-ids "$INSTANCE_ID" \
-            --document-name AWS-RunShellScript \
-            --comment "rin deploy ${GITHUB_SHA::7}" \
-            --timeout-seconds 900 \
-            --parameters "$params" \
-            --query Command.CommandId --output text)"
-          echo "SSM command $cmd_id"
-
-          # Terminal states of an invocation: Success, Failed, Cancelled, TimedOut.
-          status=""
-          while :; do
-            sleep 10
-            status="$(aws ssm get-command-invocation --command-id "$cmd_id" --instance-id "$INSTANCE_ID" \
-              --query Status --output text 2>/dev/null || true)"
-            case "$status" in
-              Success | Failed | Cancelled | TimedOut) break ;;
-            esac
-          done
-
-          echo "::group::stdout"
-          aws ssm get-command-invocation --command-id "$cmd_id" --instance-id "$INSTANCE_ID" \
-            --query StandardOutputContent --output text
-          echo "::endgroup::"
-          echo "::group::stderr"
-          aws ssm get-command-invocation --command-id "$cmd_id" --instance-id "$INSTANCE_ID" \
-            --query StandardErrorContent --output text
-          echo "::endgroup::"
-
-          if [ "$status" != Success ]; then
-            echo "::error::deploy on $INSTANCE_ID ended with $status"
-            exit 1
-          fi
-
       # Re-assume after push: this session and its registry token cannot upload images.
       - name: AWS read-only deployment session
-        if: env.RIN_DEPLOY_TARGET == 'gcp'
         uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ vars.RIN_DEPLOY_ROLE_ARN }}
@@ -135,18 +66,15 @@ jobs:
             ]}
 
       - name: Authenticate for Rin IAP and OS Login
-        if: env.RIN_DEPLOY_TARGET == 'gcp'
         uses: google-github-actions/auth@v3
         with:
           workload_identity_provider: ${{ vars.RIN_GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ vars.RIN_GCP_DEPLOY_SERVICE_ACCOUNT }}
 
       - name: Set up gcloud
-        if: env.RIN_DEPLOY_TARGET == 'gcp'
         uses: google-github-actions/setup-gcloud@v3
 
       - name: Deploy on GCP through IAP
-        if: env.RIN_DEPLOY_TARGET == 'gcp'
         env:
           IMAGE: ${{ steps.image.outputs.image }}
           RIN_GCP_PROJECT_ID: ${{ vars.RIN_GCP_PROJECT_ID }}
