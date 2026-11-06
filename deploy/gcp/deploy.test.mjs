@@ -112,12 +112,27 @@ test('GCP host refuses to create the bot before restoration is acknowledged', ()
   const r = f.exec('deploy/gcp/receive.sh'); assert.notEqual(r.status, 0);
   assert.match(r.stderr, /migration-ready/); assert.doesNotMatch(f.calls(), /pull|compose|login/);
 }));
-test('workflow defaults to AWS and scopes remote ECR auth to pull', () => {
+test('workflow deploys only to GCP without an EC2 fallback', () => {
   const workflow = source('.github/workflows/deploy.yml');
-  assert.match(workflow, /RIN_DEPLOY_TARGET/); assert.match(workflow, /inline-session-policy:/);
-  const session = workflow.split('inline-session-policy:')[1]?.split('\n      - ')[0] ?? '';
-  assert.match(session, /ecr:BatchGetImage/); assert.doesNotMatch(session, /ecr:PutImage|ecr:\*/);
+  assert.doesNotMatch(workflow, /RIN_DEPLOY_TARGET|RIN_INSTANCE_ID|Deploy on EC2|ssm send-command/);
+  assert.match(workflow, /google-github-actions\/auth@/);
   assert.match(workflow, /RIN_GCP_WORKLOAD_IDENTITY_PROVIDER/);
+  assert.match(workflow, /run: bash deploy\/gcp\/send\.sh/);
+});
+
+test('GCP deployment session keeps ECR pull and SSM read without upload permissions', () => {
+  const workflow = source('.github/workflows/deploy.yml');
+  const session = workflow.split('inline-session-policy:')[1]?.split('\n      - ')[0] ?? '';
+  const policy = JSON.parse(session.replace(/^\s*>-/, '').trim());
+  const actions = policy.Statement.flatMap((statement) => statement.Action);
+  assert.deepEqual(actions.toSorted(), [
+    'ecr:BatchCheckLayerAvailability', 'ecr:BatchGetImage', 'ecr:GetAuthorizationToken',
+    'ecr:GetDownloadUrlForLayer', 'kms:Decrypt', 'ssm:GetParametersByPath',
+  ].toSorted());
+  assert.deepEqual(policy.Statement.find((statement) => statement.Action === 'kms:Decrypt').Condition, {
+    StringEquals: { 'kms:ViaService': 'ssm.ap-northeast-2.amazonaws.com' },
+    StringLike: { 'kms:EncryptionContext:PARAMETER_ARN': 'arn:aws:ssm:ap-northeast-2:*:parameter/rin/*' },
+  });
 });
 
 function payload(f) {

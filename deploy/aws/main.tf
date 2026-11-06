@@ -1,41 +1,6 @@
-# Rin host: one EC2 instance running postgres, gateway and worker with Docker
-# Compose (deploy/compose.yaml). GitHub Actions builds the image, pushes it to
-# ECR and deploys it through SSM Run Command (.github/workflows/deploy.yml).
-# Nothing reaches the host from outside: no inbound rule, no SSH.
-#
-# Cost (ap-northeast-2, on-demand, 2026-11):
-#   t3.large          about $0.104/h
-#   EBS gp3 40 GiB    about $0.13/day
-#   public IPv4       $0.005/h
-#   total             about $2.7/day
-#
-# Remove everything: ./tf.sh destroy
-
-data "aws_caller_identity" "me" {}
-
-data "aws_vpc" "default" {
-  default = true
-}
-
-data "aws_subnets" "default" {
-  filter {
-    name   = "vpc-id"
-    values = [data.aws_vpc.default.id]
-  }
-  filter {
-    name   = "default-for-az"
-    values = ["true"]
-  }
-}
-
-data "aws_ssm_parameter" "al2023" {
-  name = "/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64"
-}
-
-# The AWS managed key SSM uses for SecureString parameters without a key id.
-data "aws_kms_alias" "ssm" {
-  name = "alias/aws/ssm"
-}
+# AWS dependencies for Rin on GCP: ECR, SSM parameters and AWS identities.
+# This root keeps the existing rin/terraform.tfstate ownership; the GCP host
+# and rin-gcp-deploy-read policy are managed by the infra repository.
 
 # One per account and already shared by other repos, so only referenced here.
 data "aws_iam_openid_connect_provider" "github" {
@@ -43,9 +8,6 @@ data "aws_iam_openid_connect_provider" "github" {
 }
 
 locals {
-  name          = "rin"
-  account_id    = data.aws_caller_identity.me.account_id
-  parameter_arn = "arn:aws:ssm:${var.region}:${local.account_id}:parameter/rin"
   # The repo uses GitHub's immutable OIDC subject, which carries the owner and repo IDs
   # (gh api repos/2026-Softbank-Hackathon-Charlie/rin/actions/oidc/customization/sub).
   github_ref = "repo:2026-Softbank-Hackathon-Charlie@350278309/rin@1443173546:ref:refs/heads/main"
@@ -77,7 +39,7 @@ resource "aws_ecr_lifecycle_policy" "rin" {
 
 # --- secrets generated here; the team's own secrets come from put-secrets.sh ---
 #
-# deploy/ec2/deploy.sh writes every /rin/* parameter to /run/rin.env on each deploy.
+# CI reads /rin/* and delivers a one-shot env to the GCP host over IAP.
 
 resource "random_password" "postgres" {
   length  = 32
@@ -132,113 +94,7 @@ resource "aws_ssm_parameter" "ai_secret_access_key" {
   value = aws_iam_access_key.ai.secret
 }
 
-# --- instance identity: SSM Session Manager and Run Command, its parameters, ECR pull ---
-
-resource "aws_iam_role" "host" {
-  name = "${local.name}-host"
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect    = "Allow"
-      Principal = { Service = "ec2.amazonaws.com" }
-      Action    = "sts:AssumeRole"
-    }]
-  })
-}
-
-resource "aws_iam_role_policy_attachment" "host_ssm_core" {
-  role       = aws_iam_role.host.name
-  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
-}
-
-resource "aws_iam_role_policy" "host" {
-  name = "read-rin-parameters-and-image"
-  role = aws_iam_role.host.id
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        # parameter/rin is what GetParametersByPath checks for --path /rin.
-        Effect   = "Allow"
-        Action   = ["ssm:GetParameter", "ssm:GetParameters", "ssm:GetParametersByPath"]
-        Resource = [local.parameter_arn, "${local.parameter_arn}/*"]
-      },
-      {
-        Effect   = "Allow"
-        Action   = "kms:Decrypt"
-        Resource = data.aws_kms_alias.ssm.target_key_arn
-      },
-      {
-        Effect   = "Allow"
-        Action   = ["ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer", "ecr:BatchCheckLayerAvailability"]
-        Resource = aws_ecr_repository.rin.arn
-      },
-      {
-        Effect   = "Allow"
-        Action   = "ecr:GetAuthorizationToken"
-        Resource = "*"
-      },
-    ]
-  })
-}
-
-resource "aws_iam_instance_profile" "host" {
-  name = "${local.name}-host"
-  role = aws_iam_role.host.name
-}
-
-# --- network: nothing in, everything out (Slack Socket Mode, Anthropic, GitHub, ECR, SSM) ---
-
-resource "aws_security_group" "host" {
-  name        = "${local.name}-host"
-  description = "Rin host: no inbound, all outbound"
-  vpc_id      = data.aws_vpc.default.id
-
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-}
-
-resource "aws_instance" "rin" {
-  ami                         = data.aws_ssm_parameter.al2023.insecure_value
-  instance_type               = "t3.large"
-  subnet_id                   = sort(data.aws_subnets.default.ids)[0]
-  vpc_security_group_ids      = [aws_security_group.host.id]
-  iam_instance_profile        = aws_iam_instance_profile.host.name
-  associate_public_ip_address = true # egress without a NAT gateway
-
-  metadata_options {
-    http_endpoint = "enabled"
-    http_tokens   = "required"
-    # The token answer cannot cross Docker's bridge, so containers cannot use
-    # the instance role. Rin uses rin-ai's keys instead.
-    http_put_response_hop_limit = 1
-  }
-
-  root_block_device {
-    volume_type = "gp3"
-    volume_size = 40
-    encrypted   = true
-  }
-
-  # First boot only: Docker, the Compose plugin and /srv/rin. Deploys bring
-  # everything else, so editing user_data never replaces the host (and its
-  # PostgreSQL data).
-  user_data                   = replace(file("${path.module}/user_data.sh"), "\r\n", "\n")
-  user_data_replace_on_change = false
-
-  tags = { Name = local.name }
-
-  lifecycle {
-    # A newer AL2023 AMI must not replace the host.
-    ignore_changes = [ami, user_data]
-  }
-}
-
-# --- GitHub Actions on main: push the image and run deploy.sh on the host ---
+# --- GitHub Actions on main: ECR push, then pull-only credentials for GCP ---
 
 resource "aws_iam_role" "deploy" {
   name = "rin-deploy"
@@ -280,19 +136,6 @@ resource "aws_iam_role_policy" "deploy" {
       {
         Effect   = "Allow"
         Action   = "ecr:GetAuthorizationToken"
-        Resource = "*"
-      },
-      {
-        Effect = "Allow"
-        Action = "ssm:SendCommand"
-        Resource = [
-          aws_instance.rin.arn,
-          "arn:aws:ssm:${var.region}::document/AWS-RunShellScript",
-        ]
-      },
-      {
-        Effect   = "Allow"
-        Action   = ["ssm:GetCommandInvocation", "ssm:ListCommandInvocations"]
         Resource = "*"
       },
     ]
