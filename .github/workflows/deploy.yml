@@ -40,15 +40,26 @@ jobs:
       - id: ecr
         uses: aws-actions/amazon-ecr-login@v2
 
+      - uses: docker/setup-buildx-action@v3
+
+      # Unchanged layers come from the GitHub Actions cache instead of being
+      # rebuilt, so they keep their digests and the host pulls only what changed.
       - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          provenance: false
+          sbom: false
+          tags: ${{ steps.ecr.outputs.registry }}/hopcharlie/rin:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Image reference
         id: image
         env:
           REGISTRY: ${{ steps.ecr.outputs.registry }}
-        run: |
-          image="$REGISTRY/hopcharlie/rin:$GITHUB_SHA"
-          docker build -t "$image" .
-          docker push "$image"
-          echo "image=$image" >> "$GITHUB_OUTPUT"
+        run: echo "image=$REGISTRY/hopcharlie/rin:$GITHUB_SHA" >> "$GITHUB_OUTPUT"
 
       # Re-assume after push: this session and its registry token cannot upload images.
       - name: AWS read-only deployment session
